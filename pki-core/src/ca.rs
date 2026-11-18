@@ -7,7 +7,7 @@ use x509_parser::prelude::FromDer;
 use crate::extensions::sid_extension;
 use crate::key::{oid_arcs, RcgenSigner, Signer, SubjectPublicKey};
 use crate::names::{AltName, DnsName, NameConstraints, NameSubtree};
-use crate::profile::{CaProfile, CaSubject, LeafProfile, SerialNumber, Validity};
+use crate::profile::{CaProfile, CaSubject, CommonName, LeafProfile, SerialNumber, Validity};
 use crate::request::OID_USER_PRINCIPAL_NAME;
 use crate::usage::UsageOid;
 use crate::Error;
@@ -106,7 +106,7 @@ impl<'a> IssuingCa<'a> {
                 "a certificate must name its subject".into(),
             ));
         }
-        if let Some(common_name) = &profile.subject.common_name {
+        if let Some(CommonName::Name(common_name)) = &profile.subject.common_name {
             if !profile.alt_names.contains(common_name) {
                 return Err(Error::InvalidValue(format!(
                     "common name {common_name} is not one of the certificate's names"
@@ -249,8 +249,14 @@ fn leaf_params(profile: &LeafProfile, serial: &SerialNumber) -> rcgen::Certifica
     for attribute in &profile.subject.attributes {
         name.push(attribute.dn_type(), attribute.value.as_str());
     }
-    if let Some(common_name) = &profile.subject.common_name {
-        name.push(rcgen::DnType::CommonName, common_name.to_string());
+    match &profile.subject.common_name {
+        Some(CommonName::Name(alt_name)) => {
+            name.push(rcgen::DnType::CommonName, alt_name.to_string());
+        }
+        Some(CommonName::DisplayName(display)) => {
+            name.push(rcgen::DnType::CommonName, display.as_str());
+        }
+        None => {}
     }
     params.distinguished_name = name;
     params.is_ca = rcgen::IsCa::ExplicitNoCa;

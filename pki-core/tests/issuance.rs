@@ -1,10 +1,11 @@
 //! Behaviour of issued chains, checked with an independent verifier.
 
 use pki_core::{
-    create_root, AltName, CaProfile, CaSubject, Certificate, CertificateRequest, CrlProfile,
-    DnsName, EcdsaCurve, Error, ExtendedKeyUsage, ExtendedKeyUsages, IssuingCa, KeyUsage,
-    LeafProfile, LeafSubject, NameConstraints, NameSubtree, RevocationReason, RevokedCertificate,
-    SerialNumber, Sid, Signer, SoftwareKey, SubjectPublicKey, UsageOid, Validity,
+    create_root, AltName, CaProfile, CaSubject, Certificate, CertificateRequest, CommonName,
+    CrlProfile, DisplayName, DnsName, EcdsaCurve, Error, ExtendedKeyUsage, ExtendedKeyUsages,
+    IssuingCa, KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree, RevocationReason,
+    RevokedCertificate, SerialNumber, Sid, Signer, SoftwareKey, SubjectPublicKey, UsageOid,
+    Validity,
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use time::macros::datetime;
@@ -46,7 +47,7 @@ fn server_profile(names: &[&str]) -> LeafProfile {
     let alt_names: Vec<AltName> = names.iter().map(|name| dns(name)).collect();
     LeafProfile {
         subject: LeafSubject {
-            common_name: alt_names.first().cloned(),
+            common_name: alt_names.first().cloned().map(CommonName::Name),
             attributes: Vec::new(),
         },
         alt_names,
@@ -174,11 +175,40 @@ fn rsa_subject_keys_are_certified() {
 fn common_name_must_be_one_of_the_names() {
     let hierarchy = Hierarchy::ecdsa();
     let mut profile = server_profile(&["radius.home"]);
-    profile.subject.common_name = Some(dns("administrator.home"));
+    profile.subject.common_name = Some(CommonName::Name(dns("administrator.home")));
     let result = hierarchy
         .issuing_ca()
         .issue(leaf_key().public_key(), &profile, &serial());
     assert!(matches!(result, Err(Error::InvalidValue(_))), "{result:?}");
+}
+
+#[test]
+fn display_name_becomes_the_common_name() {
+    let hierarchy = Hierarchy::ecdsa();
+    let mut profile = server_profile(&["radius.home"]);
+    profile.alt_names = vec![AltName::Upn(
+        pki_core::UserPrincipalName::new("jack@home").unwrap(),
+    )];
+    profile.extended_key_usages =
+        ExtendedKeyUsages::new(vec![ExtendedKeyUsage::ClientAuth]).unwrap();
+    profile.subject.common_name = Some(CommonName::DisplayName(
+        DisplayName::new("Jack Palfrey").unwrap(),
+    ));
+    let leaf = hierarchy
+        .issuing_ca()
+        .issue(leaf_key().public_key(), &profile, &serial())
+        .unwrap();
+    let parsed = parse(&leaf);
+    let common_name = parsed.subject().iter_common_name().next().unwrap();
+    assert_eq!(common_name.as_str().unwrap(), "Jack Palfrey");
+}
+
+#[test]
+fn display_names_are_plain_text() {
+    assert!(DisplayName::new("Jack Palfrey").is_ok());
+    for invalid in ["", " Jack", "Jack\nAdministrator", &"x".repeat(65)] {
+        assert!(DisplayName::new(invalid).is_err(), "{invalid:?} accepted");
+    }
 }
 
 #[test]

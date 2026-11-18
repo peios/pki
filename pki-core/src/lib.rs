@@ -31,6 +31,8 @@ pub use names::{
     AltName, DnsName, Mailbox, NameConstraints, NameSubtree, Sid, SubjectAttribute,
     SubjectAttributeKind, UserPrincipalName,
 };
-pub use profile::{CaProfile, CaSubject, LeafProfile, LeafSubject, SerialNumber, Validity};
+pub use profile::{
+    CaProfile, CaSubject, CommonName, DisplayName, LeafProfile, LeafSubject, SerialNumber, Validity,
+};
 pub use request::CertificateRequest;
 pub use usage::{ExtendedKeyUsage, ExtendedKeyUsages, KeyUsage, UsageOid};

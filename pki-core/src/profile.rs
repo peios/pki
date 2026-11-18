@@ -89,13 +89,56 @@ impl SerialNumber {
     }
 }
 
+/// The upper bound X.520 sets on a common name.
+const MAX_COMMON_NAME_LEN: usize = 64;
+
+/// A human-readable name, such as a person's display name.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct DisplayName(String);
+
+impl DisplayName {
+    /// Accepts 1 to 64 characters with no control characters and no
+    /// surrounding whitespace.
+    pub fn new(name: &str) -> Result<Self, Error> {
+        let length = name.chars().count();
+        if length == 0 || length > MAX_COMMON_NAME_LEN {
+            return Err(Error::InvalidValue(format!(
+                "display name {name:?} has an invalid length"
+            )));
+        }
+        if name.trim() != name || name.chars().any(char::is_control) {
+            return Err(Error::InvalidValue(format!(
+                "display name {name:?} is not plain text"
+            )));
+        }
+        Ok(Self(name.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+/// The common name of an end-entity certificate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CommonName {
+    /// One of the certificate's alternative names, repeated.
+    Name(AltName),
+    /// A display name for the certificate's owner.
+    ///
+    /// Policy must take this from trusted identity data, such as the owner's
+    /// account, and never from a request: a requester-chosen display name is
+    /// how forged identities reach software that trusts the common name.
+    DisplayName(DisplayName),
+}
+
 /// The subject of an end-entity certificate.
 ///
-/// The common name, if any, must be one of the certificate's alternative
-/// names; other attributes come from the template, never from a request.
+/// Attributes other than the common name come from the template, never from
+/// a request.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LeafSubject {
-    pub common_name: Option<AltName>,
+    pub common_name: Option<CommonName>,
     pub attributes: Vec<SubjectAttribute>,
 }
 
