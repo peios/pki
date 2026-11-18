@@ -6,3 +6,15 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+pem.workspace = true
+rcgen.workspace = true
+ring.workspace = true
+time.workspace = true
+x509-parser.workspace = true
+yasna.workspace = true
+zeroize.workspace = true
+
+[dev-dependencies]
+rustls-pki-types.workspace = true
+rustls-webpki.workspace = true
+time = { workspace = true, features = ["macros"] }
