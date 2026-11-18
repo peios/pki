@@ -486,6 +486,63 @@ fn request_common_name_that_is_not_a_name_is_refused() {
     );
 }
 
+/// A CSR with no subject, asking for the given alternative names.
+fn request_for(names: Vec<rcgen::SanType>) -> Result<CertificateRequest, Error> {
+    let requester = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
+    let mut asked = rcgen::CertificateParams::default();
+    asked.distinguished_name = rcgen::DistinguishedName::new();
+    asked.subject_alt_names = names;
+    let csr = asked.serialize_request(&requester).unwrap();
+    CertificateRequest::from_der(csr.der())
+}
+
+#[test]
+fn request_device_names_are_parsed() {
+    const UPN: &[u64] = &[1, 3, 6, 1, 4, 1, 311, 20, 2, 3];
+    let request = request_for(vec![
+        rcgen::SanType::OtherName((
+            UPN.to_vec(),
+            rcgen::OtherNameValue::Utf8String("jack@home".into()),
+        )),
+        rcgen::SanType::Rfc822Name("jack@home".try_into().unwrap()),
+        rcgen::SanType::IpAddress("10.1.2.3".parse().unwrap()),
+        rcgen::SanType::IpAddress("fd00::1".parse().unwrap()),
+    ])
+    .unwrap();
+    assert_eq!(
+        request.names(),
+        &[
+            AltName::Upn(pki_core::UserPrincipalName::new("jack@home").unwrap()),
+            AltName::Email(pki_core::Mailbox::new("jack@home").unwrap()),
+            AltName::Ip("10.1.2.3".parse().unwrap()),
+            AltName::Ip("fd00::1".parse().unwrap()),
+        ]
+    );
+}
+
+#[test]
+fn request_for_unsupported_name_types_is_refused() {
+    let uri = request_for(vec![rcgen::SanType::URI(
+        "https://radius.home/".try_into().unwrap(),
+    )]);
+    assert!(matches!(uri, Err(Error::UnsupportedName(_))), "{uri:?}");
+
+    let other = request_for(vec![rcgen::SanType::OtherName((
+        vec![1, 3, 6, 1, 4, 1, 99999, 1],
+        rcgen::OtherNameValue::Utf8String("anything".into()),
+    ))]);
+    assert!(matches!(other, Err(Error::UnsupportedName(_))), "{other:?}");
+}
+
+#[test]
+fn request_without_names_is_refused() {
+    let result = request_for(Vec::new());
+    assert!(
+        matches!(result, Err(Error::MalformedRequest(_))),
+        "{result:?}"
+    );
+}
+
 #[test]
 fn tampered_request_is_refused() {
     let requester = rcgen::KeyPair::generate_for(&rcgen::PKCS_ECDSA_P256_SHA256).unwrap();
