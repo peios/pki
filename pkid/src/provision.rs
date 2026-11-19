@@ -8,12 +8,10 @@ use std::io;
 use std::os::fd::AsFd;
 use std::os::unix::fs::{DirBuilderExt, OpenOptionsExt};
 
-use peios::registry::{CreateFlags, Data, Key, KeyAccess, OpenFlags, SecInfo, Transaction};
+use peios::registry::{CreateFlags, Key, KeyAccess, OpenFlags, SecInfo, Transaction};
 use peios::security::sddl;
 use pki_policy::defaults::{device_template, name_root, server_template};
-use pki_policy::{
-    RegData, SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL,
-};
+use pki_policy::{SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
 use pkid_core::SERVICE_SID;
 
 use crate::config::ROOT;
@@ -114,12 +112,7 @@ fn write_missing(key: &Key, values: &Values, transaction: &Transaction) -> io::R
                 }
             }
         }
-        let data = match data {
-            RegData::Sz(text) => Data::Sz(text.clone()),
-            RegData::MultiSz(items) => Data::MultiSz(items.clone()),
-            RegData::Dword(number) => Data::Dword(*number),
-            RegData::Binary(bytes) => Data::Binary(bytes.clone()),
-        };
+        let data = crate::registry::data(data);
         key.set_value(name.as_bytes(), data.ty(), &data.encode())
             .in_txn(transaction)
             .call()

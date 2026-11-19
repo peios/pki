@@ -1,17 +1,19 @@
 //! Turning a wire request into a pipeline call, and its result into a reply.
 //!
-//! Nothing here touches the operating system: the caller, the directory and
-//! the audit trail are supplied, so the whole of pkid's request handling is
-//! tested without a Peios kernel.
+//! Nothing here touches the operating system: the caller, the directory,
+//! the audit trail, the configuration writer and the key providers are
+//! supplied, so the whole of pkid's request handling is tested without a
+//! Peios kernel.
 
 use std::collections::HashMap;
 
 use pki_core::{RevocationReason, SerialNumber, Sid};
-use pki_keys::OpenKey;
+use pki_keys::{KeyError, KeyProviders, OpenKey};
 use pki_pipeline::{
     Authority, Directory, Pipeline, PipelineError, Principal, Submission, CA_MANAGE, CA_OFFICER,
     CA_READ, CA_REQUEST,
 };
+use pki_policy::Values;
 use pki_store::{CertificateFilter, RequestFilter, RequestId, RequestStatus, Store};
 use pkid_core::{
     AuthorityInfo, CertificateInfo, ErrorCode, Outcome, Reply, Request, RequestInfo,
@@ -19,11 +21,14 @@ use pkid_core::{
 };
 use time::OffsetDateTime;
 
-use crate::config::{AuthorityConfig, Loaded, Source};
+use crate::config::{self, AuthorityConfig, Defaults, Loaded, Source};
+use crate::manage;
 
 /// Something pkid records in its audit trail.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Event {
+    /// pkid took up a configuration; `error` says why it can't serve it.
+    ConfigurationLoaded { error: Option<String> },
     Submitted {
         ca: String,
         request: i64,
@@ -47,11 +52,37 @@ pub enum Event {
         reason: u8,
         officer: Sid,
     },
+    /// A CA was created, imported, installed or reconfigured, or its key
+    /// exported: `action` says which.
+    Managed {
+        ca: String,
+        action: &'static str,
+        operator: Sid,
+    },
 }
 
 /// Where events go: eventd, or a test's record.
 pub trait Audit {
     fn record(&self, event: Event);
+}
+
+/// The configuration pkid may write: its CAs' records, and only those.
+pub trait Configurator {
+    /// Writes `values` to `Authorities\<id>`, creating the key if need be,
+    /// and removes the values named in `remove`, all at once.
+    fn write_authority(&self, id: &str, values: &Values, remove: &[&str]) -> Result<(), String>;
+
+    /// Reads the configuration as it now stands.
+    fn read(&self) -> Source;
+}
+
+/// What pkid needs besides its state to handle a request.
+pub struct Services<'a> {
+    pub directory: &'a dyn Directory,
+    pub audit: &'a dyn Audit,
+    pub configurator: &'a dyn Configurator,
+    pub providers: &'a KeyProviders,
+    pub defaults: &'a Defaults,
 }
 
 /// Everything a request is handled against.
@@ -67,31 +98,116 @@ pub struct State {
     pub source: Option<Source>,
 }
 
+/// Takes up the configuration read from `source`, unless it is what
+/// `state` already has. An invalid configuration replaces a valid one, so
+/// pkid stops issuing rather than serving what an administrator no longer
+/// intends.
+pub fn apply(state: &mut State, source: Source, services: &Services<'_>) {
+    if state.source.as_ref() == Some(&source) {
+        return;
+    }
+    let loaded = match &source {
+        Ok(snapshot) => {
+            config::load(snapshot, services.defaults).map_err(|error| error.to_string())
+        }
+        Err(error) => Err(error.clone()),
+    };
+    services.audit.record(Event::ConfigurationLoaded {
+        error: loaded.as_ref().err().cloned(),
+    });
+    let previous_keys = std::mem::take(&mut state.keys);
+    state.keys = match &loaded {
+        Ok(loaded) => open_keys(
+            loaded,
+            state.loaded.as_ref().ok(),
+            previous_keys,
+            services.providers,
+        ),
+        Err(_) => HashMap::new(),
+    };
+    state.loaded = loaded;
+    state.source = Some(source);
+}
+
+/// Opens the keys of `loaded`'s CAs that need no passphrase, keeping those
+/// in `previous` whose CA still uses the same key.
+fn open_keys(
+    loaded: &Loaded,
+    previous_config: Option<&Loaded>,
+    mut previous: HashMap<String, OpenKey>,
+    providers: &KeyProviders,
+) -> HashMap<String, OpenKey> {
+    let mut keys = HashMap::new();
+    for authority in &loaded.authorities {
+        let unchanged = previous_config
+            .and_then(|config| config.authority(&authority.id))
+            .is_some_and(|old| old.key == authority.key);
+        if unchanged {
+            if let Some(key) = previous.remove(&authority.id) {
+                keys.insert(authority.id.clone(), key);
+                continue;
+            }
+        }
+        let opened = providers
+            .for_key(&authority.key)
+            .and_then(|provider| provider.open(&authority.key, None));
+        if let Ok(key) = opened {
+            keys.insert(authority.id.clone(), key);
+        }
+    }
+    keys
+}
+
 /// Handles one request for `caller`.
 pub fn handle(
     state: &mut State,
     request: Request,
     caller: &dyn Principal,
-    directory: &dyn Directory,
-    audit: &dyn Audit,
+    services: &Services<'_>,
     now: OffsetDateTime,
 ) -> Result<Reply, WireError> {
-    let loaded = state.loaded.as_ref().map_err(|reason| {
-        WireError::new(
+    if let Err(reason) = &state.loaded {
+        return Err(WireError::new(
             ErrorCode::Unavailable,
             format!("pkid's configuration is invalid: {reason}"),
-        )
-    })?;
-    let store = state.store.as_mut().map_err(|reason| {
-        WireError::new(
+        ));
+    }
+    if let Err(reason) = &state.store {
+        return Err(WireError::new(
             ErrorCode::Unavailable,
             format!("pkid's database is unavailable: {reason}"),
-        )
-    })?;
-
-    if request == Request::Authorities {
-        return authorities(loaded, &state.keys, caller);
+        ));
     }
+    match request {
+        Request::Authorities => authorities(state, caller),
+        Request::CreateAuthority { .. }
+        | Request::SignSubordinate { .. }
+        | Request::InstallAuthority { .. }
+        | Request::ImportAuthority { .. }
+        | Request::ExportKey { .. }
+        | Request::ConfigureAuthority { .. } => {
+            manage::handle(state, request, caller, services, now)
+        }
+        request => pipeline_request(state, request, caller, services, now),
+    }
+}
+
+fn pipeline_request(
+    state: &mut State,
+    request: Request,
+    caller: &dyn Principal,
+    services: &Services<'_>,
+    now: OffsetDateTime,
+) -> Result<Reply, WireError> {
+    let State {
+        store,
+        loaded,
+        keys,
+        ..
+    } = state;
+    let (Ok(store), Ok(loaded)) = (store.as_mut(), loaded.as_ref()) else {
+        unreachable!("checked by handle");
+    };
     let ca_id = match &request {
         Request::Submit { ca, .. }
         | Request::Approve { ca, .. }
@@ -102,23 +218,16 @@ pub fn handle(
         | Request::Certificate { ca, .. }
         | Request::CertificateFor { ca, .. }
         | Request::Certificates { ca, .. } => ca.clone(),
-        Request::Authorities => unreachable!("handled above"),
+        _ => unreachable!("routed by handle"),
     };
     let config = loaded
         .authority(&ca_id)
         .ok_or_else(|| WireError::new(ErrorCode::NotFound, format!("no CA {ca_id}")))?;
-    let authority = Authority {
-        id: config.id.clone(),
-        certificate: config.certificate.clone(),
-        security: config.security.clone(),
-        templates: config.templates.clone(),
-        crl_distribution_points: config.crl_distribution_points.clone(),
-        signer: state.keys.get(&config.id).map(|key| key.as_ref() as _),
-    };
-    let mut pipeline = Pipeline::new(store, &loaded.configuration, directory);
+    let authority = authority(config, keys)?;
+    let mut pipeline = Pipeline::new(store, &loaded.configuration, services.directory);
+    let audit = services.audit;
 
     let reply = match request {
-        Request::Authorities => unreachable!("handled above"),
         Request::Submit { template, csr, .. } => {
             let template = template.to_ascii_lowercase();
             let submission = pipeline
@@ -223,16 +332,40 @@ pub fn handle(
                 .map_err(wire)?;
             Reply::Certificates(certificates.into_iter().map(certificate_info).collect())
         }
+        _ => unreachable!("routed by handle"),
     };
     Ok(reply)
 }
 
+/// A CA as the pipeline uses it. A CA awaiting its certificate takes no
+/// requests.
+pub(crate) fn authority<'a>(
+    config: &AuthorityConfig,
+    keys: &'a HashMap<String, OpenKey>,
+) -> Result<Authority<'a>, WireError> {
+    let certificate = config.certificate.clone().ok_or_else(|| {
+        WireError::new(
+            ErrorCode::Unavailable,
+            format!("CA {} awaits its certificate", config.id),
+        )
+    })?;
+    Ok(Authority {
+        id: config.id.clone(),
+        certificate,
+        security: config.security.clone(),
+        templates: config.templates.clone(),
+        crl_distribution_points: config.crl_distribution_points.clone(),
+        signer: keys
+            .get(&config.id)
+            .map(|key| key.as_ref() as &dyn peios_crypto::Signer),
+    })
+}
+
 /// The CAs the caller holds any right at.
-fn authorities(
-    loaded: &Loaded,
-    keys: &HashMap<String, OpenKey>,
-    caller: &dyn Principal,
-) -> Result<Reply, WireError> {
+fn authorities(state: &State, caller: &dyn Principal) -> Result<Reply, WireError> {
+    let Ok(loaded) = &state.loaded else {
+        unreachable!("checked by handle");
+    };
     let any = CA_READ | CA_REQUEST | CA_OFFICER | CA_MANAGE;
     let mut listed = Vec::new();
     for authority in &loaded.authorities {
@@ -241,13 +374,13 @@ fn authorities(
             .granted(&authority.security, any, None)
             .map_err(|error| WireError::new(ErrorCode::Internal, error.to_string()))?;
         if granted != 0 {
-            listed.push(authority_info(loaded, keys, authority));
+            listed.push(authority_info(loaded, &state.keys, authority));
         }
     }
     Ok(Reply::Authorities(listed))
 }
 
-fn authority_info(
+pub(crate) fn authority_info(
     loaded: &Loaded,
     keys: &HashMap<String, OpenKey>,
     authority: &AuthorityConfig,
@@ -256,6 +389,8 @@ fn authority_info(
         id: authority.id.clone(),
         name: authority.name.clone(),
         certificate: authority.certificate.clone(),
+        request: authority.request.clone(),
+        key: authority.key.to_string(),
         templates: authority
             .templates
             .iter()
@@ -388,7 +523,7 @@ fn certificate_info(certificate: pki_store::Certificate) -> CertificateInfo {
 }
 
 /// The reply for a pipeline failure.
-fn wire(error: PipelineError) -> WireError {
+pub(crate) fn wire(error: PipelineError) -> WireError {
     let code = match &error {
         PipelineError::AccessDenied => ErrorCode::AccessDenied,
         PipelineError::NoSuchTemplate(_)
@@ -403,6 +538,22 @@ fn wire(error: PipelineError) -> WireError {
         PipelineError::Issue(_) | PipelineError::Identity(_) | PipelineError::Store(_) => {
             ErrorCode::Internal
         }
+    };
+    WireError::new(code, error.to_string())
+}
+
+/// The reply for a key storage failure.
+pub(crate) fn key_error(error: KeyError) -> WireError {
+    let code = match &error {
+        KeyError::Locked | KeyError::Unavailable(_) => ErrorCode::KeyUnavailable,
+        KeyError::WrongPassphraseOrDamaged
+        | KeyError::WeakPassphrase(_)
+        | KeyError::UnsupportedAlgorithm(_)
+        | KeyError::UnsupportedOption(_)
+        | KeyError::InvalidReference(_)
+        | KeyError::Malformed(_) => ErrorCode::BadRequest,
+        KeyError::NotExportable | KeyError::AlreadyExists(_) => ErrorCode::Conflict,
+        KeyError::Storage(..) | KeyError::Crypto(_) => ErrorCode::Internal,
     };
     WireError::new(code, error.to_string())
 }

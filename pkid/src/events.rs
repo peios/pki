@@ -49,6 +49,16 @@ fn header(writer: &mut Writer, sid: &str, ca: &str, extra: u32, rest: impl FnOnc
 impl Audit for EventLog {
     fn record(&self, event: Event) {
         match event {
+            Event::ConfigurationLoaded { error } => configuration_loaded(error.as_deref()),
+            Event::Managed {
+                ca,
+                action,
+                operator,
+            } => emit("pkid.authority.changed", |writer| {
+                header(writer, operator.as_str(), &ca, 1, |writer| {
+                    writer.write_str("action").write_str(action);
+                })
+            }),
             Event::Submitted {
                 ca,
                 request,
@@ -101,7 +111,7 @@ impl Audit for EventLog {
 
 /// `pkid.configuration.loaded`: pkid read its configuration, and whether
 /// it can serve it (rule R3: changes to it are visible).
-pub fn configuration_loaded(error: Option<&str>) {
+fn configuration_loaded(error: Option<&str>) {
     emit("pkid.configuration.loaded", |writer| {
         writer.write_map(1).write_str("outcome");
         match error {

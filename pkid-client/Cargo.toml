@@ -9,3 +9,4 @@ publish.workspace = true
 [dependencies]
 peios.workspace = true
 pkid-core = { path = "../pkid-core" }
+zeroize = "1.8"

@@ -8,17 +8,18 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use peios::security::sddl;
-use pki_keys::{KeyFileProvider, KeyProviders, OpenKey, ServiceKeyProvider};
+use pki_keys::{KeyFileProvider, KeyProviders, ServiceKeyProvider};
 use pki_pipeline::DEFAULT_CA_SDDL;
 use pki_policy::SecurityBlob;
 use pki_store::Store;
 use pkid_core::SERVICE_SID;
 
-use crate::config::{self, Loaded, Source};
-use crate::dispatch::State;
-use crate::events;
+use crate::config::{Defaults, DEFAULT_MANAGE_SDDL};
+use crate::dispatch::{apply, Configurator, Services, State};
+use crate::events::EventLog;
+use crate::identity::LocalDirectory;
 use crate::keystore::ServiceKeyFiles;
-use crate::registry;
+use crate::registry::{self, RegistryConfigurator};
 
 /// pkid's persistent state. An administrator provisions it; pkid doesn't
 /// create it, since peinit gives services no state directory of their own.
@@ -28,14 +29,25 @@ pub const DATABASE: &str = "/var/state/pki/pkid.db";
 /// Online CA keys, readable by pkid's service identity alone.
 pub const KEYS_DIR: &str = "/var/state/pki/keys";
 
-/// How often pkid re-reads its configuration even without a change notice,
-/// in case a notice was lost.
+/// How often pkid re-reads its configuration while it can't watch it.
 const REVALIDATE: Duration = Duration::from_secs(60);
+
+fn binary_sd(text: &str) -> SecurityBlob {
+    let sd = sddl::parse(text).expect("pkid's default descriptors parse");
+    SecurityBlob::new(sd.as_bytes().to_vec())
+}
+
+/// The binary forms of pkid's default descriptors.
+pub fn defaults() -> Defaults {
+    Defaults {
+        ca_security: binary_sd(DEFAULT_CA_SDDL),
+        manage_security: binary_sd(DEFAULT_MANAGE_SDDL),
+    }
+}
 
 /// The binary form of `DEFAULT_CA_SDDL`.
 pub fn default_ca_security() -> SecurityBlob {
-    let sd = sddl::parse(DEFAULT_CA_SDDL).expect("the default CA descriptor parses");
-    SecurityBlob::new(sd.as_bytes().to_vec())
+    defaults().ca_security
 }
 
 /// The key providers pkid knows.
@@ -53,51 +65,40 @@ pub fn providers() -> KeyProviders {
     providers
 }
 
-fn read_source() -> Source {
-    registry::read().map_err(|error| format!("reading the Registry: {error}"))
+/// What every request and reload shares.
+pub struct Runtime {
+    pub providers: KeyProviders,
+    pub defaults: Defaults,
 }
 
-fn interpret(source: &Source) -> Result<Loaded, String> {
-    let snapshot = source.as_ref().map_err(Clone::clone)?;
-    config::load(snapshot, &default_ca_security()).map_err(|error| error.to_string())
-}
-
-/// Opens the keys of `loaded`'s CAs that need no passphrase, keeping those
-/// in `previous` whose CA still uses the same key: a key an administrator
-/// unlocked stays unlocked across a configuration change.
-fn open_keys(
-    loaded: &Loaded,
-    previous_config: Option<&Loaded>,
-    mut previous: HashMap<String, OpenKey>,
-    providers: &KeyProviders,
-) -> HashMap<String, OpenKey> {
-    let mut keys = HashMap::new();
-    for authority in &loaded.authorities {
-        let unchanged = previous_config
-            .and_then(|config| config.authority(&authority.id))
-            .is_some_and(|old| old.key == authority.key);
-        if unchanged {
-            if let Some(key) = previous.remove(&authority.id) {
-                keys.insert(authority.id.clone(), key);
-                continue;
-            }
-        }
-        let opened = providers
-            .for_key(&authority.key)
-            .and_then(|provider| provider.open(&authority.key, None));
-        match opened {
-            Ok(key) => {
-                keys.insert(authority.id.clone(), key);
-            }
-            Err(pki_keys::KeyError::Locked) => {}
-            Err(error) => eprintln!("pkid: CA {}: its key: {error}", authority.id),
+impl Runtime {
+    pub fn new() -> Self {
+        Self {
+            providers: providers(),
+            defaults: defaults(),
         }
     }
-    keys
+
+    /// pkid's services on this machine.
+    pub fn services(&self) -> Services<'_> {
+        Services {
+            directory: &LocalDirectory,
+            audit: &EventLog,
+            configurator: &RegistryConfigurator,
+            providers: &self.providers,
+            defaults: &self.defaults,
+        }
+    }
+}
+
+impl Default for Runtime {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 /// pkid's state as it starts, with its configuration loaded.
-pub fn start(providers: &KeyProviders) -> Arc<Mutex<State>> {
+pub fn start(runtime: &Runtime) -> Arc<Mutex<State>> {
     let store = Store::open(Path::new(DATABASE)).map_err(|error| error.to_string());
     if let Err(error) = &store {
         eprintln!("pkid: the CA database: {error}");
@@ -108,41 +109,29 @@ pub fn start(providers: &KeyProviders) -> Arc<Mutex<State>> {
         keys: HashMap::new(),
         source: None,
     }));
-    refresh(&state, providers);
+    refresh(&state, runtime);
     state
 }
 
-/// Re-reads the configuration and, if it changed, replaces it in `state`,
-/// whether or not it is valid: an invalid configuration stops issuing
-/// rather than leaving the last valid one in force. Each configuration
-/// pkid takes up is recorded as an event, once.
-pub fn refresh(state: &Mutex<State>, providers: &KeyProviders) {
-    let source = read_source();
+/// Re-reads the configuration and takes it up if it changed.
+pub fn refresh(state: &Mutex<State>, runtime: &Runtime) {
+    let source = RegistryConfigurator.read();
+    if let Err(error) = &source {
+        eprintln!("pkid: configuration: {error}");
+    }
     let Ok(mut state) = state.lock() else {
         return;
     };
-    if state.source.as_ref() == Some(&source) {
-        return;
+    apply(&mut state, source, &runtime.services());
+    if let Err(error) = &state.loaded {
+        eprintln!("pkid: configuration: {error}");
     }
-    let loaded = interpret(&source);
-    events::configuration_loaded(loaded.as_ref().err().map(String::as_str));
-    let previous_keys = std::mem::take(&mut state.keys);
-    state.keys = match &loaded {
-        Ok(loaded) => open_keys(loaded, state.loaded.as_ref().ok(), previous_keys, providers),
-        Err(error) => {
-            eprintln!("pkid: configuration: {error}");
-            HashMap::new()
-        }
-    };
-    state.loaded = loaded;
-    state.source = Some(source);
 }
 
 /// Keeps `state`'s configuration current, on every change to the subtree.
 /// While the subtree can't be watched, such as before it exists, pkid
 /// re-reads it every [`REVALIDATE`] instead.
-pub fn watch(state: Arc<Mutex<State>>) {
-    let providers = providers();
+pub fn watch(state: Arc<Mutex<State>>, runtime: Arc<Runtime>) {
     loop {
         match registry::Watch::new() {
             Ok(watch) => loop {
@@ -150,7 +139,7 @@ pub fn watch(state: Arc<Mutex<State>>) {
                     eprintln!("pkid: watching the configuration: {error}");
                     break;
                 }
-                refresh(&state, &providers);
+                refresh(&state, &runtime);
             },
             Err(error) => {
                 eprintln!(
@@ -159,7 +148,7 @@ pub fn watch(state: Arc<Mutex<State>>) {
             }
         }
         std::thread::sleep(REVALIDATE);
-        refresh(&state, &providers);
+        refresh(&state, &runtime);
     }
 }
 

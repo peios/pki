@@ -2,6 +2,8 @@
 
 use std::fmt;
 
+use zeroize::Zeroizing;
+
 use crate::codec::{malformed, CodecError, Fields, MapWriter};
 
 /// Where a request stands.
@@ -97,6 +99,59 @@ pub enum Request {
         ca: String,
         query: CertificateQuery,
     },
+    /// Creates a CA with a new key: a root, a subordinate of a CA on this
+    /// pkid, or a subordinate to be signed elsewhere.
+    CreateAuthority {
+        name: String,
+        key: KeySpec,
+        issuer: Issuer,
+        lifetime_days: u32,
+        /// How many CAs may sit below this one; none means no limit.
+        path_length: Option<u8>,
+        templates: Vec<String>,
+        crl_distribution_points: Vec<String>,
+    },
+    /// Signs a subordinate CA's DER request with `ca`'s key, naming it
+    /// `name`, for a CA elsewhere.
+    SignSubordinate {
+        ca: String,
+        csr: Vec<u8>,
+        name: String,
+        lifetime_days: u32,
+        path_length: Option<u8>,
+        /// The passphrase `ca`'s key needs, if any.
+        passphrase: Option<Passphrase>,
+    },
+    /// Installs the certificate a CA awaiting one was issued.
+    InstallAuthority {
+        ca: String,
+        certificate: Vec<u8>,
+    },
+    /// Takes up an existing CA from its certificate and a sealed key file,
+    /// such as a backup.
+    ImportAuthority {
+        name: String,
+        certificate: Vec<u8>,
+        sealed_key: Vec<u8>,
+        /// The sealed key file's passphrase.
+        passphrase: Passphrase,
+        key: KeySpec,
+        templates: Vec<String>,
+        crl_distribution_points: Vec<String>,
+    },
+    /// Exports a CA's key as a key file sealed under `passphrase`.
+    ExportKey {
+        ca: String,
+        /// The passphrase the key is sealed under now, if any.
+        current: Option<Passphrase>,
+        passphrase: Passphrase,
+    },
+    /// Changes what a CA issues: the given lists replace the current ones.
+    ConfigureAuthority {
+        ca: String,
+        templates: Option<Vec<String>>,
+        crl_distribution_points: Option<Vec<String>>,
+    },
 }
 
 impl Request {
@@ -113,6 +168,12 @@ impl Request {
             Self::Certificate { .. } => "certificate",
             Self::CertificateFor { .. } => "certificate-for",
             Self::Certificates { .. } => "certificates",
+            Self::CreateAuthority { .. } => "create-authority",
+            Self::SignSubordinate { .. } => "sign-subordinate",
+            Self::InstallAuthority { .. } => "install-authority",
+            Self::ImportAuthority { .. } => "import-authority",
+            Self::ExportKey { .. } => "export-key",
+            Self::ConfigureAuthority { .. } => "configure-authority",
         }
     }
 
@@ -121,6 +182,79 @@ impl Request {
         map.str("op", self.op());
         match self {
             Self::Authorities => {}
+            Self::CreateAuthority {
+                name,
+                key,
+                issuer,
+                lifetime_days,
+                path_length,
+                templates,
+                crl_distribution_points,
+            } => {
+                map.str("name", name)
+                    .raw("key", &encode_key_spec(key)?)
+                    .raw("issuer", &encode_issuer(issuer)?)
+                    .uint("lifetime-days", u64::from(*lifetime_days))
+                    .opt_uint("path-length", path_length.map(u64::from))
+                    .strings("templates", templates)
+                    .strings("crl-distribution-points", crl_distribution_points);
+            }
+            Self::SignSubordinate {
+                ca,
+                csr,
+                name,
+                lifetime_days,
+                path_length,
+                passphrase,
+            } => {
+                map.str("ca", ca)
+                    .bin("csr", csr)
+                    .str("name", name)
+                    .uint("lifetime-days", u64::from(*lifetime_days))
+                    .opt_uint("path-length", path_length.map(u64::from))
+                    .opt_bin("passphrase", passphrase.as_ref().map(Passphrase::expose));
+            }
+            Self::InstallAuthority { ca, certificate } => {
+                map.str("ca", ca).bin("certificate", certificate);
+            }
+            Self::ImportAuthority {
+                name,
+                certificate,
+                sealed_key,
+                passphrase,
+                key,
+                templates,
+                crl_distribution_points,
+            } => {
+                map.str("name", name)
+                    .bin("certificate", certificate)
+                    .bin("sealed-key", sealed_key)
+                    .bin("passphrase", passphrase.expose())
+                    .raw("key", &encode_key_spec(key)?)
+                    .strings("templates", templates)
+                    .strings("crl-distribution-points", crl_distribution_points);
+            }
+            Self::ExportKey {
+                ca,
+                current,
+                passphrase,
+            } => {
+                map.str("ca", ca)
+                    .opt_bin("current", current.as_ref().map(Passphrase::expose))
+                    .bin("passphrase", passphrase.expose());
+            }
+            Self::ConfigureAuthority {
+                ca,
+                templates,
+                crl_distribution_points,
+            } => {
+                map.str("ca", ca)
+                    .opt_strings("templates", templates.as_deref())
+                    .opt_strings(
+                        "crl-distribution-points",
+                        crl_distribution_points.as_deref(),
+                    );
+            }
             Self::Submit { ca, template, csr } => {
                 map.str("ca", ca).str("template", template).bin("csr", csr);
             }
@@ -170,8 +304,67 @@ impl Request {
                 .unwrap_or(u32::MAX)
                 .min(crate::MAX_LISTING))
         };
+        let lifetime = || -> Result<u32, CodecError> {
+            u32::try_from(fields.uint("lifetime-days")?)
+                .map_err(|_| malformed("lifetime out of range"))
+        };
+        let path_length = || -> Result<Option<u8>, CodecError> {
+            fields
+                .opt_uint("path-length")?
+                .map(|length| {
+                    u8::try_from(length).map_err(|_| malformed("path length out of range"))
+                })
+                .transpose()
+        };
+        let passphrase = |key: &str| -> Result<Option<Passphrase>, CodecError> {
+            Ok(fields
+                .opt_bin(key)?
+                .map(|bytes| Passphrase::new(bytes.to_vec())))
+        };
         let request = match fields.str("op")? {
             "authorities" => Self::Authorities,
+            "create-authority" => Self::CreateAuthority {
+                name: fields.str("name")?.to_owned(),
+                key: decode_key_spec(&fields.map("key")?)?,
+                issuer: decode_issuer(&fields.map("issuer")?)?,
+                lifetime_days: lifetime()?,
+                path_length: path_length()?,
+                templates: fields.strings("templates")?,
+                crl_distribution_points: fields.strings("crl-distribution-points")?,
+            },
+            "sign-subordinate" => Self::SignSubordinate {
+                ca: ca()?,
+                csr: fields.bin("csr")?.to_vec(),
+                name: fields.str("name")?.to_owned(),
+                lifetime_days: lifetime()?,
+                path_length: path_length()?,
+                passphrase: passphrase("passphrase")?,
+            },
+            "install-authority" => Self::InstallAuthority {
+                ca: ca()?,
+                certificate: fields.bin("certificate")?.to_vec(),
+            },
+            "import-authority" => Self::ImportAuthority {
+                name: fields.str("name")?.to_owned(),
+                certificate: fields.bin("certificate")?.to_vec(),
+                sealed_key: fields.bin("sealed-key")?.to_vec(),
+                passphrase: passphrase("passphrase")?
+                    .ok_or_else(|| malformed("missing passphrase"))?,
+                key: decode_key_spec(&fields.map("key")?)?,
+                templates: fields.strings("templates")?,
+                crl_distribution_points: fields.strings("crl-distribution-points")?,
+            },
+            "export-key" => Self::ExportKey {
+                ca: ca()?,
+                current: passphrase("current")?,
+                passphrase: passphrase("passphrase")?
+                    .ok_or_else(|| malformed("missing passphrase"))?,
+            },
+            "configure-authority" => Self::ConfigureAuthority {
+                ca: ca()?,
+                templates: fields.opt_strings("templates")?,
+                crl_distribution_points: fields.opt_strings("crl-distribution-points")?,
+            },
             "submit" => Self::Submit {
                 ca: ca()?,
                 template: fields.str("template")?.to_owned(),
@@ -244,11 +437,68 @@ pub struct TemplateInfo {
 pub struct AuthorityInfo {
     pub id: String,
     pub name: String,
-    /// The CA's DER certificate.
-    pub certificate: Vec<u8>,
+    /// The CA's DER certificate, unless it awaits one.
+    pub certificate: Option<Vec<u8>>,
+    /// For a CA awaiting its certificate, the DER request to have signed.
+    pub request: Option<Vec<u8>>,
+    /// Where its key is kept, as `provider:locator`.
+    pub key: String,
     pub templates: Vec<TemplateInfo>,
-    /// Whether pkid can sign with the CA's key now.
+    /// Whether pkid can sign with the CA's key unattended.
     pub key_available: bool,
+}
+
+/// A passphrase in transit. Its bytes are wiped when it is dropped, and it
+/// is never printed.
+#[derive(Clone, PartialEq, Eq)]
+pub struct Passphrase(Zeroizing<Vec<u8>>);
+
+impl Passphrase {
+    pub fn new(bytes: Vec<u8>) -> Self {
+        Self(Zeroizing::new(bytes))
+    }
+
+    pub fn expose(&self) -> &[u8] {
+        &self.0
+    }
+}
+
+impl fmt::Debug for Passphrase {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("Passphrase(..)")
+    }
+}
+
+/// Where and how to keep a new CA key.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct KeySpec {
+    /// `service` for pkid's own store, or `file` for a passphrase-sealed
+    /// file.
+    pub provider: String,
+    /// The file's absolute path, for `file`. Service keys are named after
+    /// their CA.
+    pub locator: Option<String>,
+    /// `ecdsa-p256`, `ecdsa-p384`, `rsa-2048`, `rsa-3072` or `rsa-4096`,
+    /// for a key pkid generates.
+    pub algorithm: Option<String>,
+    pub exportable: bool,
+    /// The passphrase to seal a `file` key under.
+    pub passphrase: Option<Passphrase>,
+}
+
+/// Who signs a new CA's certificate.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Issuer {
+    /// The CA itself: a root.
+    SelfSigned,
+    /// A CA elsewhere: pkid returns a request to have signed, and the CA
+    /// awaits its certificate.
+    Offline,
+    /// A CA on this pkid, with the passphrase its key needs, if any.
+    Authority {
+        ca: String,
+        passphrase: Option<Passphrase>,
+    },
 }
 
 /// What became of a submitted or approved request.
@@ -395,6 +645,12 @@ pub enum Reply {
     Requests(Vec<RequestInfo>),
     Certificate(CertificateInfo),
     Certificates(Vec<CertificateInfo>),
+    /// A CA, as created, installed, imported or changed.
+    Authority(AuthorityInfo),
+    /// A subordinate CA's DER certificate, signed for a CA elsewhere.
+    Signed(Vec<u8>),
+    /// A key file sealed under the passphrase the export gave.
+    SealedKey(Vec<u8>),
 }
 
 impl Reply {
@@ -407,6 +663,9 @@ impl Reply {
             Self::Requests(_) => "requests",
             Self::Certificate(_) => "certificate",
             Self::Certificates(_) => "certificates",
+            Self::Authority(_) => "authority",
+            Self::Signed(_) => "signed",
+            Self::SealedKey(_) => "sealed-key",
         }
     }
 
@@ -467,6 +726,15 @@ impl Reply {
                     .collect::<Result<Vec<_>, _>>()?;
                 map.array("certificates", &encoded);
             }
+            Reply::Authority(authority) => {
+                map.raw("authority", &encode_authority(authority)?);
+            }
+            Reply::Signed(certificate) => {
+                map.bin("certificate", certificate);
+            }
+            Reply::SealedKey(sealed) => {
+                map.bin("sealed-key", sealed);
+            }
         }
         map.finish()
     }
@@ -506,10 +774,70 @@ impl Reply {
             "certificates" => {
                 Reply::Certificates(fields.array("certificates", decode_certificate)?)
             }
+            "authority" => Reply::Authority(decode_authority_fields(&fields.map("authority")?)?),
+            "signed" => Reply::Signed(fields.bin("certificate")?.to_vec()),
+            "sealed-key" => Reply::SealedKey(fields.bin("sealed-key")?.to_vec()),
             other => return Err(malformed(format!("reply kind {other}"))),
         };
         Ok(Ok(reply))
     }
+}
+
+fn encode_key_spec(key: &KeySpec) -> Result<Vec<u8>, CodecError> {
+    MapWriter::new()
+        .str("provider", &key.provider)
+        .opt_str("locator", key.locator.as_deref())
+        .opt_str("algorithm", key.algorithm.as_deref())
+        .bool("exportable", key.exportable)
+        .opt_bin(
+            "passphrase",
+            key.passphrase.as_ref().map(Passphrase::expose),
+        )
+        .finish()
+}
+
+fn decode_key_spec(fields: &Fields<'_>) -> Result<KeySpec, CodecError> {
+    Ok(KeySpec {
+        provider: fields.str("provider")?.to_owned(),
+        locator: fields.opt_str("locator")?.map(str::to_owned),
+        algorithm: fields.opt_str("algorithm")?.map(str::to_owned),
+        exportable: fields.bool("exportable")?,
+        passphrase: fields
+            .opt_bin("passphrase")?
+            .map(|bytes| Passphrase::new(bytes.to_vec())),
+    })
+}
+
+fn encode_issuer(issuer: &Issuer) -> Result<Vec<u8>, CodecError> {
+    let mut map = MapWriter::new();
+    match issuer {
+        Issuer::SelfSigned => {
+            map.str("kind", "self");
+        }
+        Issuer::Offline => {
+            map.str("kind", "offline");
+        }
+        Issuer::Authority { ca, passphrase } => {
+            map.str("kind", "authority")
+                .str("ca", ca)
+                .opt_bin("passphrase", passphrase.as_ref().map(Passphrase::expose));
+        }
+    }
+    map.finish()
+}
+
+fn decode_issuer(fields: &Fields<'_>) -> Result<Issuer, CodecError> {
+    Ok(match fields.str("kind")? {
+        "self" => Issuer::SelfSigned,
+        "offline" => Issuer::Offline,
+        "authority" => Issuer::Authority {
+            ca: fields.str("ca")?.to_owned(),
+            passphrase: fields
+                .opt_bin("passphrase")?
+                .map(|bytes| Passphrase::new(bytes.to_vec())),
+        },
+        other => return Err(malformed(format!("issuer {other}"))),
+    })
 }
 
 fn encode_authority(authority: &AuthorityInfo) -> Result<Vec<u8>, CodecError> {
@@ -526,18 +854,25 @@ fn encode_authority(authority: &AuthorityInfo) -> Result<Vec<u8>, CodecError> {
     MapWriter::new()
         .str("id", &authority.id)
         .str("name", &authority.name)
-        .bin("certificate", &authority.certificate)
+        .opt_bin("certificate", authority.certificate.as_deref())
+        .opt_bin("request", authority.request.as_deref())
+        .str("key", &authority.key)
         .array("templates", &templates)
         .bool("key-available", authority.key_available)
         .finish()
 }
 
 fn decode_authority(bytes: &[u8]) -> Result<AuthorityInfo, CodecError> {
-    let fields = Fields::read(bytes)?;
+    decode_authority_fields(&Fields::read(bytes)?)
+}
+
+fn decode_authority_fields(fields: &Fields<'_>) -> Result<AuthorityInfo, CodecError> {
     Ok(AuthorityInfo {
         id: fields.str("id")?.to_owned(),
         name: fields.str("name")?.to_owned(),
-        certificate: fields.bin("certificate")?.to_vec(),
+        certificate: fields.opt_bin("certificate")?.map(<[u8]>::to_vec),
+        request: fields.opt_bin("request")?.map(<[u8]>::to_vec),
+        key: fields.str("key")?.to_owned(),
         templates: fields.array("templates", |bytes| {
             let template = Fields::read(bytes)?;
             Ok(TemplateInfo {

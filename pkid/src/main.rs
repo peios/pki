@@ -49,8 +49,8 @@ fn main() -> ExitCode {
         eprintln!("pkid: {error}");
         return ExitCode::FAILURE;
     }
-    let providers = service::providers();
-    let state = service::start(&providers);
+    let runtime = Arc::new(service::Runtime::new());
+    let state = service::start(&runtime);
     let listener = match server::listen() {
         Ok(listener) => listener,
         Err(error) => {
@@ -60,10 +60,11 @@ fn main() -> ExitCode {
     };
     {
         let state = Arc::clone(&state);
-        std::thread::spawn(move || service::watch(state));
+        let runtime = Arc::clone(&runtime);
+        std::thread::spawn(move || service::watch(state, runtime));
     }
     service::notify_ready();
-    match server::serve(listener, state) {
+    match server::serve(listener, state, runtime) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("pkid: {}: {error}", pkid_core::SOCKET_PATH);

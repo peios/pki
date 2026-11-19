@@ -46,6 +46,19 @@ The pki command and window do not offer this setting.
 
 A certificate whose names have no single owner never carries the extension.
 
+--- machine\software\pki\settings managesecurity
+canonical: Machine\Software\Pki\Settings ManageSecurity
+type: REG_BINARY
+default: O:SYG:SYD:(A;;0x8;;;BA)(A;;0x8;;;SY)
+valid: a self-relative security descriptor
+applies: immediately
+
+Who may create and import CAs on this pkid: Manage CA (0x8). Changing an
+existing CA needs Manage CA in its own CaSecurity instead.
+
+Whoever holds it can create a root and issue anything from it, so grant it
+only to principals you would trust to run the CA.
+
 --- machine\software\pki\templates
 canonical: Machine\Software\Pki\Templates
 
@@ -251,11 +264,22 @@ The CA's display name.
 --- machine\software\pki\authorities\<id> certificate
 canonical: Machine\Software\Pki\Authorities\<id> Certificate
 type: REG_BINARY
-default: (required)
+default: (required, or Request)
 valid: a DER X.509 CA certificate whose key is the CA's key
 applies: immediately
 
-The CA's own certificate.
+The CA's own certificate. A CA created to be signed elsewhere has none
+until it is installed, and takes no requests until then.
+
+--- machine\software\pki\authorities\<id> request
+canonical: Machine\Software\Pki\Authorities\<id> Request
+type: REG_BINARY
+default: none
+valid: a DER PKCS #10 request
+applies: immediately
+
+For a CA awaiting its certificate, the request to take to the CA that will
+sign it. Installing the certificate removes it.
 
 --- machine\software\pki\authorities\<id> key
 canonical: Machine\Software\Pki\Authorities\<id> Key

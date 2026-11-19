@@ -3,10 +3,11 @@
 use std::io;
 use std::time::Duration;
 
-use peios::registry::{Data, Key, KeyAccess, NotifyFilter, OpenFlags, Transaction};
+use peios::registry::{CreateFlags, Data, Key, KeyAccess, NotifyFilter, OpenFlags, Transaction};
 use pki_policy::{RegData, Values};
 
-use crate::config::{Snapshot, ROOT};
+use crate::config::{Snapshot, Source, ROOT};
+use crate::dispatch::Configurator;
 
 /// Limits on what pkid reads, so a damaged or hostile configuration can't
 /// exhaust it.
@@ -141,6 +142,67 @@ pub fn read() -> io::Result<Snapshot> {
             }
             result => return result,
         }
+    }
+}
+
+/// A value as the Registry stores it.
+pub fn data(value: &RegData) -> Data {
+    match value {
+        RegData::Sz(text) => Data::Sz(text.clone()),
+        RegData::MultiSz(items) => Data::MultiSz(items.clone()),
+        RegData::Dword(number) => Data::Dword(*number),
+        RegData::Binary(bytes) => Data::Binary(bytes.clone()),
+    }
+}
+
+/// Writes CA records, under the grant provisioning gave pkid on
+/// `Authorities`.
+pub struct RegistryConfigurator;
+
+impl RegistryConfigurator {
+    fn write(id: &str, values: &Values, remove: &[&str]) -> io::Result<()> {
+        if id.is_empty()
+            || !id
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() || byte == b'-')
+        {
+            return Err(io::Error::other(format!("{id} is not a CA identifier")));
+        }
+        let transaction = Transaction::begin()?;
+        let (key, _) = Key::create(
+            None,
+            &format!("{ROOT}\\Authorities\\{id}"),
+            KeyAccess::QUERY_VALUE | KeyAccess::SET_VALUE,
+            CreateFlags::empty(),
+            None,
+            Some(&transaction),
+        )?;
+        for (name, value) in values.iter() {
+            let value = data(value);
+            key.set_value(name.as_bytes(), value.ty(), &value.encode())
+                .in_txn(&transaction)
+                .call()?;
+        }
+        for name in remove {
+            if let Err(error) = key.delete_value(name.as_bytes(), None, Some(&transaction)) {
+                let error: io::Error = error.into();
+                if error.kind() != io::ErrorKind::NotFound {
+                    return Err(error);
+                }
+            }
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+}
+
+impl Configurator for RegistryConfigurator {
+    fn write_authority(&self, id: &str, values: &Values, remove: &[&str]) -> Result<(), String> {
+        Self::write(id, values, remove).map_err(|error| format!("writing CA {id}: {error}"))
+    }
+
+    fn read(&self) -> Source {
+        read().map_err(|error| format!("reading the Registry: {error}"))
     }
 }
 
