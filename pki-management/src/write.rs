@@ -8,18 +8,47 @@ use pki_policy::Values;
 
 use crate::registry::data;
 
-/// Creates `path`, with any keys above it that are missing, in
-/// `transaction`. Says whether `path` itself was new.
+/// Creates `path`, and each key above it that is missing, in
+/// `transaction`, opening the last with `access`. Says whether `path`
+/// itself was new. The Registry creates one key at a time: a key whose
+/// parent is missing is refused, and a machine need not have
+/// `Machine\Software` yet.
+pub fn create_all(
+    path: &str,
+    access: KeyAccess,
+    transaction: &Transaction,
+) -> io::Result<(Key, bool)> {
+    let segments: Vec<&str> = path.split('\\').collect();
+    let mut at = segments[0].to_string();
+    let mut last = None;
+    // The first segment is the hive, which always exists.
+    for (index, segment) in segments.iter().enumerate().skip(1) {
+        at.push('\\');
+        at.push_str(segment);
+        let access = if index + 1 == segments.len() {
+            access
+        } else {
+            KeyAccess::QUERY_VALUE
+        };
+        let (key, disposition) = Key::create(
+            None,
+            &at,
+            access,
+            CreateFlags::empty(),
+            None,
+            Some(transaction),
+        )?;
+        last = Some((key, disposition == Disposition::CreatedNew));
+    }
+    last.ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, format!("{path} is a hive")))
+}
+
 fn create_path(path: &str, transaction: &Transaction) -> io::Result<(Key, bool)> {
-    let (key, disposition) = Key::create(
-        None,
+    create_all(
         path,
         KeyAccess::QUERY_VALUE | KeyAccess::SET_VALUE,
-        CreateFlags::empty(),
-        None,
-        Some(transaction),
-    )?;
-    Ok((key, disposition == Disposition::CreatedNew))
+        transaction,
+    )
 }
 
 fn apply(key: &Key, set: &Values, remove: &[&str], transaction: &Transaction) -> io::Result<()> {
@@ -80,17 +109,11 @@ pub fn create(path: &str, set: &Values) -> io::Result<()> {
     Ok(())
 }
 
-/// Deletes the key `path`, which must have no keys below it.
+/// Deletes the key `path`, which must have no keys below it. One deletion
+/// needs no transaction, and kernels before read-only snapshots
+/// (2026-11-16) can't delete within one.
 pub fn delete(path: &str) -> io::Result<()> {
-    let transaction = Transaction::begin()?;
-    let key = Key::open_transacted(
-        None,
-        path,
-        KeyAccess::DELETE,
-        OpenFlags::empty(),
-        Some(&transaction),
-    )?;
-    key.delete_key(None, Some(&transaction))?;
-    transaction.commit()?;
+    let key = Key::open(None, path, KeyAccess::DELETE, OpenFlags::empty())?;
+    key.delete_key(None, None)?;
     Ok(())
 }

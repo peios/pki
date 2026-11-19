@@ -165,12 +165,23 @@ pkid.certificate.revoked
 .PP
 Each is documented in
 .BR evman (1).
+.SH NOTES
+.BR pkid 's
+service runs under its own virtual service account, whose token
+.BR authd (8)
+makes, so the service requires
+.BR authd .
+The account needs SeChangeNotifyPrivilege, and SeAuditPrivilege to emit its events; without SeAuditPrivilege,
+.B pkid
+works but each event fails with a message on standard error.
+It must be able to read the attributes of every directory on the path to its database, as SQLite checks each when it opens it.
 .SH READINESS
 .B pkid
 tells peinit it is ready once its socket is listening, even while its configuration is invalid, so that it can answer and say what is wrong.
 .SH SEE ALSO
 .BR evman (1),
 .BR regman (1),
+.BR authd (8),
 .BR pki (8)
 .PP
 https://learn.peios.org/peios/using-peios/certificate-authority/overview
