@@ -906,6 +906,38 @@ or
 .BR already\-exists )
 and a
 .BR message .
+.SH CONFIGURATION
+.BR setup ,
+the
+.B template
+commands and the
+.B name
+commands read and write
+.B Machine\eSoftware\ePki
+directly, each change in one Registry transaction.
+The
+.B ca
+commands read it only to find templates by name.
+Each value is documented in
+.BR regman (1);
+run
+.BR "regman Machine\eSoftware\ePki" .
+.SH SECURITY
+.B pki
+grants nothing itself.
+.B pkid
+decides each
+.BR ca ,
+.BR request ,
+.B cert
+and
+.B enroll
+command by your own access token, against the CA's descriptor, the template's and the names'; see
+.BR pkid (8).
+The commands that write the Registry need write access to the keys under
+.BR Machine\eSoftware\ePki ,
+which Administrators have by default.
+Whoever can write them decides which certificates are issued and to whom.
 .SH EXIT STATUS
 .TP
 .B 0

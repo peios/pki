@@ -1,0 +1,174 @@
+.TH PKID 8 2026-11-19 "Peios pki 0.1.0"
+.SH NAME
+pkid \- run the Peios certificate authority, issuing X.509 certificates by policy
+.SH SYNOPSIS
+.B pkid
+.br
+.B pkid
+.RB [ \-h | \-\-help | \-V | \-\-version ]
+.SH DESCRIPTION
+.B pkid
+is the Peios certificate authority service.
+It runs the machine's CAs: it keeps their online keys, issues and revokes certificates, and records every request and decision in its database.
+.PP
+peinit starts
+.B pkid
+as the
+.B pkid
+service, under its own virtual service account; you do not run it yourself.
+.B pkid
+refuses to start under any other identity, since its keys are readable by that account alone.
+Run
+.BR pki (8)
+to manage it.
+.PP
+Before the first start, an administrator runs
+.BR "pki setup" ,
+which creates
+.BR pkid 's
+state directories and seeds its configuration.
+.B pkid
+has no authority to create either itself.
+Started before setup,
+.B pkid
+runs but cannot record anything, and opens its database at the first configuration change after setup.
+.PP
+.B pkid
+serves requests on a local socket, one request per connection.
+It authorizes each by the access token of the process that connected, which the kernel captures as it connects, and never acts as its caller.
+A request names a CA; what the caller may do there is decided by that CA's security descriptor, and whether a certificate is issued by the CA's templates and the name trees.
+A request that policy permits is issued at once, held for an officer of the CA to approve, or refused.
+.PP
+A CA's key is kept in one of two places.
+A key in
+.BR pkid 's
+own store, under
+.IR /var/state/pki/keys ,
+signs unattended.
+A key sealed in a file under a passphrase, such as a root's on removable media, is never kept open:
+each operation that signs with it takes the passphrase in the same request, and
+.B pkid
+forgets the key when the operation ends.
+.PP
+Configuration changes apply without a restart.
+.B pkid
+watches its Registry subtree and rereads it whenever it changes, and every 60 seconds while it cannot watch it.
+It takes up a configuration only as a whole: while any part of it is invalid,
+.B pkid
+issues nothing, and says why in its events, until it is corrected.
+.SH OPTIONS
+.B pkid
+takes no options when it serves.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the program name and version and exit.
+.SH CONFIGURATION
+.B pkid
+reads its configuration from
+.BR Machine\eSoftware\ePki :
+.B Settings
+for the whole machine,
+.B Templates
+for the kinds of certificate its CAs issue,
+.B Names
+for who may request certificates for which names, and
+.B Authorities
+for the CAs themselves.
+It writes only
+.BR Authorities ,
+where it records the CAs created through it; the rest is an administrator's to change, with
+.BR pki (8)
+or directly.
+Each value is documented in
+.BR regman (1);
+run
+.BR "regman Machine\eSoftware\ePki" .
+.SH SECURITY
+Each CA's
+.B CaSecurity
+descriptor grants four rights:
+.TP
+.B Read (0x1)
+See every request and certificate of the CA.
+Without it, a caller sees only the requests it submitted and the certificates for them or for names it owns.
+.TP
+.B Request (0x2)
+Submit certificate requests.
+.TP
+.B Officer (0x4)
+Approve and deny held requests, and revoke certificates.
+An officer can never approve a request it submitted itself.
+.TP
+.B Manage (0x8)
+Change the CA, sign subordinate CAs with its key, and export its key.
+.PP
+The default
+.B CaSecurity
+lets Authenticated Users request, and Administrators and SYSTEM do everything.
+Creating and importing CAs needs Manage (0x8) in
+.BR "Settings ManageSecurity" ,
+held by Administrators and SYSTEM by default.
+.PP
+A request is issued only if the caller may enrol in its template, by the template's
+.BR EnrollSecurity ,
+and may request each name it asks for, by the
+.B RequestSecurity
+of that name or the nearest name above it.
+Approval checks the request again as its requester, as they were when they submitted it, so an officer's own rights never widen what is issued.
+.PP
+Everyone can connect to the socket; what each caller can do is decided only by these checks.
+A client can check that the server it reached is
+.B pkid
+by its service SID, S\-1\-5\-80\-927106304\-3681130234\-3843647545\-210868499\-909250352.
+.SH EXIT STATUS
+.TP
+.B 0
+.B pkid
+stopped serving normally, or printed help or its version.
+.TP
+.B 1
+.B pkid
+could not start, such as when it runs under the wrong identity or cannot create its socket, or its socket failed.
+.TP
+.B 2
+Usage error: an argument was given.
+.SH FILES
+.TP
+.I /run/pkid/pki.sock
+The control socket.
+.TP
+.I /var/state/pki/pkid.db
+The CA database: every request, certificate, decision and revocation, with who made each.
+It holds nothing secret.
+.TP
+.I /var/state/pki/keys
+The keys of CAs kept in
+.BR pkid 's
+store, each readable by
+.BR pkid 's
+service account alone.
+.SH EVENTS
+.B pkid
+emits these event types:
+.PP
+.nf
+pkid.configuration.loaded
+pkid.request.submitted
+pkid.request.approved
+pkid.request.denied
+pkid.authority.changed
+pkid.certificate.revoked
+.fi
+.PP
+Each is documented in
+.BR evman (1).
+.SH READINESS
+.B pkid
+tells peinit it is ready once its socket is listening, even while its configuration is invalid, so that it can answer and say what is wrong.
+.SH SEE ALSO
+.BR evman (1),
+.BR regman (1),
+.BR pki (8)
