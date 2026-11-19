@@ -47,24 +47,8 @@ impl CertificateRequest {
     /// Parses a DER request and verifies its signature, which proves the
     /// requester holds the private key.
     pub fn from_der(der: &[u8]) -> Result<Self, Error> {
-        let (remainder, request) = X509CertificationRequest::from_der(der)
-            .map_err(|error| Error::MalformedRequest(error.to_string()))?;
-        if !remainder.is_empty() {
-            return Err(Error::MalformedRequest(
-                "trailing bytes after the request".into(),
-            ));
-        }
+        let (request, subject_key) = verified(der)?;
         let info = &request.certification_request_info;
-        let subject_key = SubjectPublicKey::from_der(info.subject_pki.raw)?;
-        let algorithm = signature_algorithm(&request.signature_algorithm)?;
-        subject_key
-            .verifying_key()
-            .verify(algorithm, info.raw, &request.signature_value.data)
-            .map_err(|error| match error {
-                peios_crypto::Error::VerificationFailed
-                | peios_crypto::Error::IncompatibleScheme => Error::InvalidRequestSignature,
-                error => Error::Crypto(error),
-            })?;
 
         let mut names = Vec::new();
         for extension in request.requested_extensions().into_iter().flatten() {
@@ -112,6 +96,39 @@ impl CertificateRequest {
     pub fn names(&self) -> &[AltName] {
         &self.names
     }
+}
+
+/// The key of a DER request for a subordinate CA certificate, once its
+/// signature proves the requester holds it.
+///
+/// Nothing else in the request is used: the signing CA's operator names the
+/// subordinate and decides its constraints, as for any certificate (R4).
+pub fn ca_request_key(der: &[u8]) -> Result<SubjectPublicKey, Error> {
+    verified(der).map(|(_, key)| key)
+}
+
+/// Parses a DER request and verifies its signature against its own key.
+fn verified(der: &[u8]) -> Result<(X509CertificationRequest<'_>, SubjectPublicKey), Error> {
+    let (remainder, request) = X509CertificationRequest::from_der(der)
+        .map_err(|error| Error::MalformedRequest(error.to_string()))?;
+    if !remainder.is_empty() {
+        return Err(Error::MalformedRequest(
+            "trailing bytes after the request".into(),
+        ));
+    }
+    let info = &request.certification_request_info;
+    let subject_key = SubjectPublicKey::from_der(info.subject_pki.raw)?;
+    let algorithm = signature_algorithm(&request.signature_algorithm)?;
+    subject_key
+        .verifying_key()
+        .verify(algorithm, info.raw, &request.signature_value.data)
+        .map_err(|error| match error {
+            peios_crypto::Error::VerificationFailed | peios_crypto::Error::IncompatibleScheme => {
+                Error::InvalidRequestSignature
+            }
+            error => Error::Crypto(error),
+        })?;
+    Ok((request, subject_key))
 }
 
 /// How a request was signed, for the algorithms peios-crypto verifies:

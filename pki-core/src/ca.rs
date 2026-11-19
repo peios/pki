@@ -47,6 +47,19 @@ pub fn create_root(
     })
 }
 
+/// A PKCS #10 request for a CA certificate for `signer`'s key, for a CA
+/// elsewhere to sign. It carries only the key and `subject`: the signing CA
+/// decides everything else.
+pub fn ca_request(signer: &dyn Signer, subject: &CaSubject) -> Result<Vec<u8>, Error> {
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name = ca_distinguished_name(subject)?;
+    let signer = RcgenSigner::new(signer)?;
+    let request = params
+        .serialize_request(&signer)
+        .map_err(|error| signer.error(error))?;
+    Ok(request.der().to_vec())
+}
+
 /// A CA certificate together with the signer for its key.
 pub struct IssuingCa<'a> {
     certificate: Vec<u8>,

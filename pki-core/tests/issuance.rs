@@ -2,10 +2,10 @@
 
 use peios_crypto::{KeyAlgorithm, PrivateKey, PublicKey, SignatureScheme, Signer};
 use pki_core::{
-    create_root, AltName, CaProfile, CaSubject, Certificate, CertificateRequest, CommonName,
-    CrlProfile, DisplayName, DnsName, Error, ExtendedKeyUsage, ExtendedKeyUsages, IssuingCa,
-    KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree, RevocationReason,
-    RevokedCertificate, SerialNumber, Sid, SubjectPublicKey, UsageOid, Validity,
+    ca_request, ca_request_key, create_root, AltName, CaProfile, CaSubject, Certificate,
+    CertificateRequest, CommonName, CrlProfile, DisplayName, DnsName, Error, ExtendedKeyUsage,
+    ExtendedKeyUsages, IssuingCa, KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree,
+    RevocationReason, RevokedCertificate, SerialNumber, Sid, SubjectPublicKey, UsageOid, Validity,
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use time::macros::datetime;
@@ -171,6 +171,38 @@ fn rsa_root_with_ecdsa_issuing_ca_verifies() {
         .issue(key.subject(), &server_profile(&["radius.home"]), &serial())
         .unwrap();
     hierarchy.verify_server(&leaf, "radius.home").unwrap();
+}
+
+#[test]
+fn subordinate_requests_carry_only_their_key() {
+    let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
+    let root = create_root(&root_key, &ca_profile("Test Root", Some(1)), &serial()).unwrap();
+    let issuing_key = TestKey::generate(KeyAlgorithm::EcdsaP256);
+    let request = ca_request(
+        &issuing_key,
+        &CaSubject {
+            common_name: "Asked For Name".into(),
+            attributes: Vec::new(),
+        },
+    )
+    .unwrap();
+    let key = ca_request_key(&request).unwrap();
+    assert_eq!(&key, issuing_key.subject());
+
+    // The operator names the subordinate, whatever the request said.
+    let issuing = IssuingCa::new(root.der(), &root_key)
+        .unwrap()
+        .issue_ca(&key, &ca_profile("Test Issuing CA", Some(0)), &serial())
+        .unwrap();
+    let (_, parsed) = X509Certificate::from_der(issuing.der()).unwrap();
+    let name = parsed.subject().iter_common_name().next().unwrap();
+    assert_eq!(name.as_str().unwrap(), "Test Issuing CA");
+    IssuingCa::new(issuing.der(), &issuing_key).unwrap();
+
+    let mut tampered = request.clone();
+    let last = tampered.len() - 1;
+    tampered[last] ^= 0x01;
+    assert!(ca_request_key(&tampered).is_err());
 }
 
 #[test]
