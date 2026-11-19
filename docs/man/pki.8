@@ -665,6 +665,9 @@ for Administrators and
 for Authenticated Users.
 .B pki
 warns when a name's own descriptor lets a broad group, such as Authenticated Users or Users, request it without approval, and when such a group is made an owner: every member could then obtain certificates for the name.
+A tree's root inherits nothing, so its descriptor is written as given;
+.B pki
+warns when one leaves Administrators unable to request the names in the tree, or owners unable to request their own.
 Prefer Request with approval (0x2) for groups.
 .SH PASSPHRASES
 A key in a sealed file signs only with its passphrase, and
