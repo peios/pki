@@ -384,6 +384,23 @@ fn certificate_listings_can_leave_out_revoked_ones() {
         ..CertificateFilter::default()
     };
     assert_eq!(store.certificates(&owned).unwrap().len(), 2);
+
+    let someone_else = sid("S-1-5-21-1-2-3-1003");
+    let theirs = year_long();
+    store
+        .record_issued(&new_request(&someone_else), &theirs)
+        .unwrap();
+    let requested = CertificateFilter {
+        requester: Some(someone_else),
+        ..CertificateFilter::default()
+    };
+    let serials: Vec<_> = store
+        .certificates(&requested)
+        .unwrap()
+        .into_iter()
+        .map(|certificate| certificate.serial)
+        .collect();
+    assert_eq!(serials, vec![theirs.serial]);
 }
 
 /// A fresh, empty directory for one test's database.
