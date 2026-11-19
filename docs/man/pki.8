@@ -537,7 +537,10 @@ the new key's algorithm, one of
 and
 .BR rsa\-4096 .
 The default is
-.BR ecdsa\-p384 .
+.B rsa\-4096
+for a root, which any software can verify for as long as a root lasts, and
+.B ecdsa\-p384
+for any other CA.
 .TP
 .BI \-\-lifetime " days"
 For

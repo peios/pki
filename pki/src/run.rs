@@ -298,7 +298,14 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
             let key = key_spec(
                 &create.keeping,
                 key_file,
-                Some(create.algorithm.clone()),
+                Some(create.algorithm.clone().unwrap_or_else(|| {
+                    if root {
+                        cli::ROOT_ALGORITHM
+                    } else {
+                        cli::SUBORDINATE_ALGORITHM
+                    }
+                    .to_string()
+                })),
                 seal,
             );
             let lifetime_days = create.lifetime.unwrap_or(if root {

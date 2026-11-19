@@ -15,19 +15,19 @@ const MAX_VALUE_BYTES: usize = 64 * 1024;
 const MAX_RECORDS: usize = 10_000;
 const MAX_DEPTH: usize = 64;
 
-fn open(path: &str, transaction: &Transaction) -> io::Result<Key> {
+fn open(path: &str, transaction: Option<&Transaction>) -> io::Result<Key> {
     Key::open_transacted(
         None,
         path,
         KeyAccess::QUERY_VALUE | KeyAccess::ENUMERATE_SUB_KEYS,
         OpenFlags::empty(),
-        Some(transaction),
+        transaction,
     )
     .map_err(Into::into)
 }
 
 /// Opens `path`, or nothing if it doesn't exist.
-fn open_optional(path: &str, transaction: &Transaction) -> io::Result<Option<Key>> {
+fn open_optional(path: &str, transaction: Option<&Transaction>) -> io::Result<Option<Key>> {
     match open(path, transaction) {
         Ok(key) => Ok(Some(key)),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(None),
@@ -35,10 +35,10 @@ fn open_optional(path: &str, transaction: &Transaction) -> io::Result<Option<Key
     }
 }
 
-fn values(key: &Key, transaction: &Transaction) -> io::Result<Values> {
+fn values(key: &Key, transaction: Option<&Transaction>) -> io::Result<Values> {
     let mut out = Values::new();
     let mut count = 0;
-    for value in key.values(Some(transaction)) {
+    for value in key.values(transaction) {
         let value = value.map_err(io::Error::from)?;
         count += 1;
         if count > MAX_VALUES || value.data.len() > MAX_VALUE_BYTES {
@@ -60,9 +60,9 @@ fn values(key: &Key, transaction: &Transaction) -> io::Result<Values> {
     Ok(out)
 }
 
-fn subkey_names(key: &Key, transaction: &Transaction) -> io::Result<Vec<String>> {
+fn subkey_names(key: &Key, transaction: Option<&Transaction>) -> io::Result<Vec<String>> {
     let mut names = Vec::new();
-    for subkey in key.subkeys(Some(transaction)) {
+    for subkey in key.subkeys(transaction) {
         let subkey = subkey.map_err(io::Error::from)?;
         names.push(
             String::from_utf8(subkey.name)
@@ -76,7 +76,7 @@ fn subkey_names(key: &Key, transaction: &Transaction) -> io::Result<Vec<String>>
 }
 
 /// Each key under `path` with its values, by name.
-fn records(path: &str, transaction: &Transaction) -> io::Result<Vec<(String, Values)>> {
+fn records(path: &str, transaction: Option<&Transaction>) -> io::Result<Vec<(String, Values)>> {
     let Some(parent) = open_optional(path, transaction)? else {
         return Ok(Vec::new());
     };
@@ -89,7 +89,7 @@ fn records(path: &str, transaction: &Transaction) -> io::Result<Vec<(String, Val
 }
 
 /// Every node of a name tree, by its key path below the tree's root.
-fn tree(path: &str, transaction: &Transaction) -> io::Result<Vec<(Vec<String>, Values)>> {
+fn tree(path: &str, transaction: Option<&Transaction>) -> io::Result<Vec<(Vec<String>, Values)>> {
     let mut nodes = Vec::new();
     let Some(root) = open_optional(path, transaction)? else {
         return Ok(nodes);
@@ -115,17 +115,26 @@ fn tree(path: &str, transaction: &Transaction) -> io::Result<Vec<(Vec<String>, V
 }
 
 fn read_once() -> io::Result<Snapshot> {
-    let transaction = Transaction::begin_read_only().map_err(io::Error::from)?;
-    let settings = match open_optional(&format!("{ROOT}\\Settings"), &transaction)? {
-        Some(key) => values(&key, &transaction)?,
+    // A kernel without read-only snapshots (before 2026-11-16) is read
+    // directly. A read that races a change can then see part of it, which
+    // fails validation or is superseded: the change also wakes the watch,
+    // and the next read sees it whole.
+    let snapshot = match Transaction::begin_read_only() {
+        Ok(snapshot) => Some(snapshot),
+        Err(error) if error.raw_os_error() == Some(libc::ENOSYS) => None,
+        Err(error) => return Err(error.into()),
+    };
+    let transaction = snapshot.as_ref();
+    let settings = match open_optional(&format!("{ROOT}\\Settings"), transaction)? {
+        Some(key) => values(&key, transaction)?,
         None => Values::new(),
     };
     Ok(Snapshot {
         settings,
-        templates: records(&format!("{ROOT}\\Templates"), &transaction)?,
-        dns: tree(&format!("{ROOT}\\Names\\Dns"), &transaction)?,
-        principals: tree(&format!("{ROOT}\\Names\\Principals"), &transaction)?,
-        authorities: records(&format!("{ROOT}\\Authorities"), &transaction)?,
+        templates: records(&format!("{ROOT}\\Templates"), transaction)?,
+        dns: tree(&format!("{ROOT}\\Names\\Dns"), transaction)?,
+        principals: tree(&format!("{ROOT}\\Names\\Principals"), transaction)?,
+        authorities: records(&format!("{ROOT}\\Authorities"), transaction)?,
     })
 }
 

@@ -20,6 +20,9 @@ fn every_descriptor_provisioning_writes_parses() {
 fn only_pkid_gets_full_access_to_its_keys() {
     let dacl = provision::keys_dacl();
     assert!(dacl.starts_with("D:P"), "{dacl}");
-    assert!(dacl.contains(&format!("(A;;GA;;;{SERVICE_SID})")), "{dacl}");
-    assert_eq!(dacl.matches(";GA;").count(), 1, "{dacl}");
+    assert!(
+        dacl.contains(&format!("(A;OICI;FA;;;{SERVICE_SID})")),
+        "{dacl}"
+    );
+    assert_eq!(dacl.matches(";FA;").count(), 1, "{dacl}");
 }

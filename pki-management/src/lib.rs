@@ -58,3 +58,14 @@ pub fn new_guid() -> io::Result<String> {
         &hex[20..32]
     ))
 }
+
+/// An I/O error in the system's own wording, without Rust's error number.
+pub fn os_message(error: &io::Error) -> String {
+    let mut text = error.to_string();
+    if let Some(at) = text.find(" (os error ") {
+        if text.ends_with(')') {
+            text.truncate(at);
+        }
+    }
+    text
+}
