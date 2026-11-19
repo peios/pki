@@ -752,6 +752,7 @@ dependencies = [
  "pkid-core",
  "rcgen",
  "time",
+ "x509-parser",
 ]
 
 [[package]]

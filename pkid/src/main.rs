@@ -63,6 +63,11 @@ fn main() -> ExitCode {
         let runtime = Arc::clone(&runtime);
         std::thread::spawn(move || service::watch(state, runtime));
     }
+    {
+        let state = Arc::clone(&state);
+        let runtime = Arc::clone(&runtime);
+        std::thread::spawn(move || service::maintain_crls(state, runtime));
+    }
     service::notify_ready();
     match server::serve(listener, state, runtime) {
         Ok(()) => ExitCode::SUCCESS,

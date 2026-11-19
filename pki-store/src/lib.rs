@@ -16,6 +16,6 @@ mod types;
 pub use error::StoreError;
 pub use store::Store;
 pub use types::{
-    Certificate, CertificateFilter, NewCertificate, NewRequest, Request, RequestFilter, RequestId,
-    RequestStatus, Revocation,
+    Certificate, CertificateFilter, Crl, NewCertificate, NewRequest, Request, RequestFilter,
+    RequestId, RequestStatus, Revocation,
 };

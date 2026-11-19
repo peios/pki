@@ -40,6 +40,11 @@ pki \- manage the Peios certificate authority
 .I ca
 .RI [ options ]
 .br
+.B pki ca publish\-crl
+.I ca
+.RB [ \-\-passphrase\-file
+.IR file ]
+.br
 .B pki request submit
 .I ca template request-file
 .RB [ \-\-out
@@ -213,7 +218,7 @@ It never replaces a value an administrator has set, so it is safe to run again.
 Only an administrator can run it.
 .TP
 .B ca list
-List the CAs: name, ID, and whether each issues or awaits its certificate.
+List the CAs: name, ID, whether each issues or awaits its certificate, and when its current CRL expires, flagged when it expires soon.
 .TP
 .BI "ca show " ca
 Show a CA in full: its key, the templates it issues from, and its certificate's subject, issuer, serial number, validity and SHA-256 fingerprint.
@@ -285,8 +290,19 @@ The file is readable by its owner alone.
 .BI "ca set " ca
 Change which templates
 .I ca
-issues from, or the CRL distribution points its certificates name.
+issues from, the CRL distribution points its certificates name, or how long its CRLs are valid.
 Each list given replaces the current one; a list not given stays as it is.
+.TP
+.BI "ca publish\-crl " ca
+Sign and publish a new CRL for
+.I ca
+now.
+.B pkid
+does this itself for a CA whose key it keeps, at half each CRL's lifetime and after every revocation.
+A CA whose key is in a sealed file, such as an offline root, can only sign with its passphrase, so an officer runs this after revoking with it and before its CRL expires;
+.B pki ca show
+says when that is.
+Only an officer of the CA can.
 .TP
 .BI "request submit " "ca template request-file"
 Ask
@@ -341,6 +357,11 @@ names.
 .TP
 .BI "cert revoke " "ca serial"
 Revoke a certificate.
+.B pkid
+publishes a CRL listing it at once, unless the CA's key is in a sealed file, when
+.B pki
+reminds you to run
+.BR "ca publish\-crl" .
 .BI \-\-reason " reason"
 gives the reason, as RFC 5280 names it:
 .BR unspecified ,
@@ -574,6 +595,14 @@ Repeat for more.
 .TP
 .B \-\-no\-crls
 Name no CRL distribution points.
+.TP
+.BI \-\-crl\-lifetime " days"
+Make each CRL the CA signs valid for
+.I days
+days, from 1 to 3650.
+The default is 7 for a CA whose key
+.B pkid
+keeps, and 180 for one whose key is in a sealed file.
 .SS Templates
 These apply to
 .B template create
@@ -690,6 +719,8 @@ the sealed key file's, for
 .BR "ca import" ;
 the key's current one, for
 .BR "ca export\-key" ;
+the CA key's, for
+.BR "ca publish\-crl" ;
 the PKCS #12 file's, and a held key's, for
 .BR enroll .
 .TP
@@ -725,6 +756,16 @@ or
 .B id
 and
 .BR name ),
+.BR crl_lifetime_days ,
+.B crl
+(its current CRL's
+.BR number ,
+.BR this_update ,
+.BR next_update ,
+.B expired
+and
+.BR expiring ,
+or null),
 and
 .BR certificate :
 its
@@ -756,6 +797,14 @@ or
 prints the
 .B certificate
 in PEM.
+.B ca publish\-crl
+prints the
+.BR ca ,
+and the new CRL's
+.BR number ,
+.B this_update
+and
+.BR next_update .
 .PP
 A request has
 .BR id ,

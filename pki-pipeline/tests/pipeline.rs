@@ -669,3 +669,64 @@ fn owner_display_names_come_from_the_directory() {
         .to_string();
     assert_eq!(common_name, "RADIUS Service");
 }
+
+#[test]
+fn crls_list_revocations_and_number_themselves() {
+    use x509_parser::prelude::{CertificateRevocationList, FromDer};
+    let mut world = World::new();
+    let Submission::Issued { request, .. } =
+        world.submit(SERVER, &["radius.home"], &Person::user(RADIUS))
+    else {
+        panic!("expected an issued certificate");
+    };
+    let serial = world
+        .store
+        .certificate_for(request)
+        .unwrap()
+        .unwrap()
+        .serial;
+    let ca = world.ca.authority();
+    let week = time::Duration::days(7);
+    let mut pipeline = Pipeline::new(&mut world.store, &world.configuration, &world.people);
+    let first = pipeline.issue_crl(&ca, NOW, week).unwrap();
+    assert_eq!(first.number, 1);
+    pipeline
+        .revoke(
+            &ca,
+            &serial,
+            RevocationReason::KeyCompromise,
+            &Person::admin(ALEX),
+            NOW,
+        )
+        .unwrap();
+    // Only officers ask for one.
+    assert_eq!(
+        pipeline.publish_crl(&ca, &Person::user(JACK), NOW, week),
+        Err(PipelineError::AccessDenied)
+    );
+    let second = pipeline
+        .publish_crl(&ca, &Person::admin(ALEX), NOW, week)
+        .unwrap();
+    assert_eq!(second.number, 2);
+    assert_eq!(second.next_update - second.this_update, week);
+
+    let (_, list) = CertificateRevocationList::from_der(&second.der).unwrap();
+    let revoked: Vec<_> = list.iter_revoked_certificates().collect();
+    assert_eq!(revoked.len(), 1);
+    assert_eq!(revoked[0].raw_serial(), serial.as_bytes());
+    let (_, issuer) = X509Certificate::from_der(&world.ca.certificate).unwrap();
+    assert!(list.verify_signature(issuer.public_key()).is_ok());
+    assert_eq!(world.store.crl(CA_ID).unwrap().unwrap(), second);
+}
+
+#[test]
+fn no_crl_is_signed_without_the_key() {
+    let mut world = World::new();
+    let mut ca = world.ca.authority();
+    ca.signer = None;
+    let mut pipeline = Pipeline::new(&mut world.store, &world.configuration, &world.people);
+    assert_eq!(
+        pipeline.issue_crl(&ca, NOW, time::Duration::days(7)),
+        Err(PipelineError::KeyUnavailable)
+    );
+}

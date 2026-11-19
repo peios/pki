@@ -4,8 +4,8 @@ use std::path::PathBuf;
 
 use pki_core::{RevocationReason, SerialNumber, Sid};
 use pki_store::{
-    CertificateFilter, NewCertificate, NewRequest, RequestFilter, RequestStatus, Revocation, Store,
-    StoreError,
+    CertificateFilter, Crl, NewCertificate, NewRequest, RequestFilter, RequestStatus, Revocation,
+    Store, StoreError,
 };
 use time::macros::datetime;
 use time::OffsetDateTime;
@@ -461,4 +461,62 @@ fn linked_databases_are_refused() {
     let path = directory.join("pkid.db");
     std::os::unix::fs::symlink(&target, &path).unwrap();
     assert!(matches!(Store::open(&path), Err(StoreError::Unusable(_))));
+}
+
+#[test]
+fn crl_numbers_only_go_forward() {
+    let mut store = Store::memory().unwrap();
+    assert_eq!(store.crl("ca").unwrap(), None);
+    let first = Crl {
+        number: 1,
+        this_update: datetime!(2027-01-01 0:00 UTC),
+        next_update: datetime!(2027-01-08 0:00 UTC),
+        der: vec![0x30, 0x00],
+    };
+    store.record_crl("ca", &first).unwrap();
+    assert_eq!(store.crl("ca").unwrap(), Some(first.clone()));
+    // The same number again, or a lower one, is refused.
+    assert!(matches!(
+        store.record_crl("ca", &first),
+        Err(StoreError::Invalid(_))
+    ));
+    let second = Crl {
+        number: 2,
+        ..first.clone()
+    };
+    store.record_crl("ca", &second).unwrap();
+    assert_eq!(store.crl("ca").unwrap().unwrap().number, 2);
+    // Each CA counts on its own.
+    store.record_crl("other", &first).unwrap();
+    assert_eq!(store.crl("other").unwrap().unwrap().number, 1);
+}
+
+#[test]
+fn revocations_after_a_crl_are_noticed() {
+    let mut store = Store::memory().unwrap();
+    let id = store
+        .record_pending(&new_request(&requester()), &[])
+        .unwrap();
+    let issued = year_long();
+    let serial = issued.serial.clone();
+    store
+        .approve(id, &officer(), datetime!(2027-01-01 0:00 UTC), &issued)
+        .unwrap();
+    let crl_time = datetime!(2027-02-01 0:00 UTC);
+    assert!(!store.revoked_since(CA, crl_time).unwrap());
+    store
+        .revoke(
+            CA,
+            &serial,
+            &Revocation {
+                revoked: datetime!(2027-03-01 0:00 UTC),
+                reason: RevocationReason::KeyCompromise,
+                revoker: officer(),
+            },
+        )
+        .unwrap();
+    assert!(store.revoked_since(CA, crl_time).unwrap());
+    assert!(!store
+        .revoked_since(CA, datetime!(2027-04-01 0:00 UTC))
+        .unwrap());
 }

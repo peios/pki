@@ -1,8 +1,32 @@
+--- event pkid.crl.published
+tier: standard
+gating: none
+cardinality: once per CRL
+
+A CA signed a new CRL, on pkid's own schedule or at an officer's request,
+and pkid handed it to its publishers.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.number, object.pkid.next_update
+
+--- event pkid.crl.expiring
+tier: standard
+gating: none
+cardinality: at most daily per CA
+
+A CA's CRL is running out. For a CA whose key is in a sealed file, from 30
+days before it expires: an officer has to sign a new one with `pki ca
+publish-crl`. For a CA whose key pkid keeps, once three quarters of its
+life has passed, which means pkid's own renewal has been failing. Also
+emitted for a CA that has distribution points but no CRL.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.next_update
+
 --- field subject.token.sid
 type: str
 
 The SID of the principal that made the request: the requester of a
-submission, or the officer who decided or revoked.
+submission, or the officer who decided, revoked or published. pkid's own
+service SID for what pkid did on its own schedule.
 
 pkid reads it from the token the kernel captured when the caller connected.
 
@@ -36,6 +60,18 @@ the certificate.
 type: uint
 
 The RFC 5280 revocation reason code.
+
+--- field object.pkid.number
+type: uint
+
+The CRL's number. Each CA numbers its CRLs from 1, and a number is never
+reused.
+
+--- field object.pkid.next_update
+type: int
+
+When the CRL expires, in seconds since the Unix epoch. Absent when the CA
+has no CRL.
 
 --- field object.pkid.action
 type: str.enum

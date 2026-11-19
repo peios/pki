@@ -7,13 +7,13 @@ use rusqlite::{params, Connection, OptionalExtension, Row, TransactionBehavior};
 use time::OffsetDateTime;
 
 use crate::{
-    Certificate, CertificateFilter, NewCertificate, NewRequest, Request, RequestFilter, RequestId,
-    RequestStatus, Revocation, StoreError,
+    Certificate, CertificateFilter, Crl, NewCertificate, NewRequest, Request, RequestFilter,
+    RequestId, RequestStatus, Revocation, StoreError,
 };
 
 /// ASCII `PKID`, marking the database as pkid's.
 const APPLICATION: i64 = 0x504b_4944;
-const SCHEMA: i64 = 1;
+const SCHEMA: i64 = 2;
 
 const SCHEMA_V1: &str = "
 CREATE TABLE requests (
@@ -56,6 +56,17 @@ CREATE TABLE revocations (
     revoker TEXT NOT NULL,
     PRIMARY KEY (ca, serial),
     FOREIGN KEY (ca, serial) REFERENCES certificates (ca, serial)
+);
+";
+
+/// Version 2: each CA's latest CRL, which also fixes the next CRL number.
+const SCHEMA_V2: &str = "
+CREATE TABLE crls (
+    ca TEXT PRIMARY KEY CHECK (ca <> ''),
+    number INTEGER NOT NULL CHECK (number > 0),
+    this_update INTEGER NOT NULL,
+    next_update INTEGER NOT NULL CHECK (next_update > this_update),
+    der BLOB NOT NULL
 );
 ";
 
@@ -163,6 +174,9 @@ impl Store {
         // Each schema version adds a step here; steps only ever go forward.
         if version < 1 {
             transaction.execute_batch(SCHEMA_V1)?;
+        }
+        if version < 2 {
+            transaction.execute_batch(SCHEMA_V2)?;
         }
         transaction.execute_batch(&format!(
             "PRAGMA application_id = {APPLICATION}; PRAGMA user_version = {SCHEMA};"
@@ -413,6 +427,90 @@ impl Store {
             revoked.push((serial, read_revocation(row, 1)?));
         }
         Ok(revoked)
+    }
+}
+
+impl Store {
+    /// The CA's latest CRL, if it has signed one.
+    pub fn crl(&self, ca: &str) -> Result<Option<Crl>, StoreError> {
+        self.connection
+            .query_row(
+                "SELECT number, this_update, next_update, der FROM crls WHERE ca = ?1",
+                params![ca],
+                |row| {
+                    Ok((
+                        row.get::<_, i64>(0)?,
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, Vec<u8>>(3)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(number, this_update, next_update, der)| {
+                Ok(Crl {
+                    number: u64::try_from(number)
+                        .map_err(|_| StoreError::Corrupt(format!("CRL number {number}")))?,
+                    this_update: timestamp(this_update)?,
+                    next_update: timestamp(next_update)?,
+                    der,
+                })
+            })
+            .transpose()
+    }
+
+    /// Records `crl` as the CA's latest. Its number has to follow the last
+    /// one's, so that no two CRLs of a CA ever share a number.
+    pub fn record_crl(&mut self, ca: &str, crl: &Crl) -> Result<(), StoreError> {
+        let transaction = self
+            .connection
+            .transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let last: Option<i64> = transaction
+            .query_row(
+                "SELECT number FROM crls WHERE ca = ?1",
+                params![ca],
+                |row| row.get(0),
+            )
+            .optional()?;
+        let number = i64::try_from(crl.number)
+            .map_err(|_| StoreError::Corrupt(format!("CRL number {}", crl.number)))?;
+        if last.is_some_and(|last| number <= last) {
+            return Err(StoreError::Invalid(format!(
+                "CRL number {} does not follow {}",
+                crl.number,
+                last.unwrap_or_default()
+            )));
+        }
+        transaction.execute(
+            "INSERT INTO crls (ca, number, this_update, next_update, der)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT (ca) DO UPDATE SET number = excluded.number,
+                 this_update = excluded.this_update, next_update = excluded.next_update,
+                 der = excluded.der",
+            params![
+                ca,
+                number,
+                crl.this_update.unix_timestamp(),
+                crl.next_update.unix_timestamp(),
+                crl.der
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Whether the CA has revoked a certificate at or after `since`, which
+    /// a CRL signed then might not list.
+    pub fn revoked_since(&self, ca: &str, since: OffsetDateTime) -> Result<bool, StoreError> {
+        Ok(self
+            .connection
+            .query_row(
+                "SELECT 1 FROM revocations WHERE ca = ?1 AND revoked >= ?2 LIMIT 1",
+                params![ca, since.unix_timestamp()],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
     }
 }
 

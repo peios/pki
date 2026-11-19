@@ -78,7 +78,67 @@ pub fn state(authority: &AuthorityInfo) -> &'static str {
     }
 }
 
+/// How long before expiry a CRL that is renewed by hand is flagged.
+const CRL_WARN_BEFORE: i64 = 30 * 86_400;
+
+/// Whether a CA's CRL is running out, as pkid warns about it: a CRL pkid
+/// renews itself once three quarters of its life has passed, and one
+/// renewed by hand, with a sealed key, 30 days before it expires.
+pub fn crl_expiring(authority: &AuthorityInfo, now: i64) -> bool {
+    let Some(crl) = &authority.crl else {
+        return false;
+    };
+    let warn_from = if authority.key_available {
+        crl.next_update - (crl.next_update - crl.this_update) / 4
+    } else {
+        crl.next_update - CRL_WARN_BEFORE
+    };
+    now >= warn_from
+}
+
+fn now() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|elapsed| elapsed.as_secs() as i64)
+        .unwrap_or(0)
+}
+
+/// A CA's CRL, in a line.
+pub fn crl_text(authority: &AuthorityInfo, now: i64) -> String {
+    match &authority.crl {
+        None if authority.certificate.is_some() => "none yet".to_string(),
+        None => "none".to_string(),
+        Some(crl) => {
+            let mut text = format!(
+                "number {}, valid until {}",
+                crl.number,
+                time(crl.next_update)
+            );
+            if crl.next_update <= now {
+                text.push_str(" (EXPIRED)");
+            } else if crl_expiring(authority, now) {
+                text.push_str(" (expires soon)");
+            }
+            text
+        }
+    }
+}
+
+/// When a CA's CRL expires, flagged when it is running out, for a table.
+pub fn crl_until(authority: &AuthorityInfo) -> String {
+    let now = now();
+    match &authority.crl {
+        None => "none".to_string(),
+        Some(crl) if crl.next_update <= now => format!("{} EXPIRED", time(crl.next_update)),
+        Some(crl) if crl_expiring(authority, now) => {
+            format!("{} expires soon", time(crl.next_update))
+        }
+        Some(crl) => time(crl.next_update),
+    }
+}
+
 pub fn authority_json(authority: &AuthorityInfo) -> Value {
+    let now = now();
     json!({
         "id": authority.id,
         "name": authority.name,
@@ -90,6 +150,14 @@ pub fn authority_json(authority: &AuthorityInfo) -> Value {
             "name": template.name,
         })).collect::<Vec<_>>(),
         "certificate": authority.certificate.as_deref().and_then(summary).as_ref().map(summary_json),
+        "crl_lifetime_days": authority.crl_lifetime_days,
+        "crl": authority.crl.as_ref().map(|crl| json!({
+            "number": crl.number,
+            "this_update": time(crl.this_update),
+            "next_update": time(crl.next_update),
+            "expired": crl.next_update <= now,
+            "expiring": crl_expiring(authority, now),
+        })),
     })
 }
 
@@ -152,6 +220,11 @@ pub fn authority_text(authority: &AuthorityInfo) -> String {
             },
         ),
         ("Templates", templates),
+        ("CRL", crl_text(authority, now())),
+        (
+            "CRL lifetime",
+            format!("{} days", authority.crl_lifetime_days),
+        ),
     ];
     if let Some(summary) = authority.certificate.as_deref().and_then(summary) {
         rows.extend([

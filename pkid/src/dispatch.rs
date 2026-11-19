@@ -22,6 +22,7 @@ use pkid_core::{
 use time::OffsetDateTime;
 
 use crate::config::{self, AuthorityConfig, Defaults, Loaded, Source};
+use crate::crl::{self, Publication, Publisher};
 use crate::manage;
 
 /// Something pkid records in its audit trail.
@@ -59,6 +60,19 @@ pub enum Event {
         action: &'static str,
         operator: Sid,
     },
+    /// A CA signed and published a CRL: on pkid's own schedule, or at an
+    /// officer's request.
+    CrlPublished {
+        ca: String,
+        number: u64,
+        next_update: i64,
+        officer: Option<Sid>,
+    },
+    /// A CA's CRL expires soon, or it has none to publish.
+    CrlExpiring {
+        ca: String,
+        next_update: Option<i64>,
+    },
 }
 
 /// Where events go: eventd, or a test's record.
@@ -83,6 +97,8 @@ pub struct Services<'a> {
     pub configurator: &'a dyn Configurator,
     pub providers: &'a KeyProviders,
     pub defaults: &'a Defaults,
+    /// Where CRLs go once signed.
+    pub publishers: &'a [Box<dyn Publisher>],
 }
 
 /// Everything a request is handled against.
@@ -96,6 +112,8 @@ pub struct State {
     pub keys: HashMap<String, OpenKey>,
     /// What `loaded` came from, so an unchanged Registry isn't loaded again.
     pub source: Option<Source>,
+    /// What has been published and warned about since pkid started.
+    pub publication: Publication,
 }
 
 /// Takes up the configuration read from `source`, unless it is what
@@ -180,6 +198,15 @@ pub fn handle(
     }
     match request {
         Request::Authorities => authorities(state, caller),
+        Request::PublishCrl { ca, passphrase } => {
+            crl::handle_publish(state, &ca, passphrase.as_ref(), caller, services, now)
+        }
+        Request::Revoke { ref ca, .. } => {
+            let ca = ca.clone();
+            let reply = pipeline_request(state, request, caller, services, now)?;
+            crl::after_revocation(state, &ca, services, now);
+            Ok(reply)
+        }
         Request::CreateAuthority { .. }
         | Request::SignSubordinate { .. }
         | Request::InstallAuthority { .. }
@@ -374,7 +401,12 @@ fn authorities(state: &State, caller: &dyn Principal) -> Result<Reply, WireError
             .granted(&authority.security, any, None)
             .map_err(|error| WireError::new(ErrorCode::Internal, error.to_string()))?;
         if granted != 0 {
-            listed.push(authority_info(loaded, &state.keys, authority));
+            listed.push(authority_info(
+                loaded,
+                &state.keys,
+                state.store.as_ref().ok(),
+                authority,
+            ));
         }
     }
     Ok(Reply::Authorities(listed))
@@ -383,6 +415,7 @@ fn authorities(state: &State, caller: &dyn Principal) -> Result<Reply, WireError
 pub(crate) fn authority_info(
     loaded: &Loaded,
     keys: &HashMap<String, OpenKey>,
+    store: Option<&Store>,
     authority: &AuthorityConfig,
 ) -> AuthorityInfo {
     AuthorityInfo {
@@ -406,6 +439,8 @@ pub(crate) fn authority_info(
             })
             .collect(),
         key_available: keys.contains_key(&authority.id),
+        crl_lifetime_days: authority.crl_lifetime_days,
+        crl: crl::latest(store, &authority.id),
     }
 }
 

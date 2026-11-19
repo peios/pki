@@ -11,6 +11,7 @@ fn every_descriptor_provisioning_writes_parses() {
         provision::state_dacl(),
         provision::keys_dacl(),
         provision::authorities_grant(),
+        provision::http_dacl(),
     ] {
         sddl::parse(&text).unwrap_or_else(|error| panic!("{text}: {error}"));
     }

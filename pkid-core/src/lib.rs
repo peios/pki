@@ -24,7 +24,7 @@ mod message;
 
 pub use codec::{read_frame, write_frame, CodecError, FrameError};
 pub use message::{
-    AuthorityInfo, CertificateInfo, CertificateQuery, ErrorCode, Issuer, KeySpec, Outcome,
+    AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo, ErrorCode, Issuer, KeySpec, Outcome,
     Passphrase, Reply, Request, RequestInfo, RequestQuery, RequestStatus, RevocationInfo,
     SubmissionInfo, TemplateInfo, WireError,
 };
@@ -41,6 +41,12 @@ pub const SERVICE_NAME: &str = "pkid";
 /// 32-bit sub-authorities under `S-1-5-80`. Clients check that the server
 /// they reach has it.
 pub const SERVICE_SID: &str = "S-1-5-80-927106304-3681130234-3843647545-210868499-909250352";
+
+/// The service that serves pkid's published CRLs over HTTP.
+pub const HTTPD_SERVICE_NAME: &str = "pki-httpd";
+/// Its service SID, by the same rule as [`SERVICE_SID`].
+pub const HTTPD_SERVICE_SID: &str =
+    "S-1-5-80-4101192810-2505649581-2921298127-1686389970-3617382032";
 
 /// The largest request payload pkid reads. A certificate request is a few
 /// kilobytes at most.

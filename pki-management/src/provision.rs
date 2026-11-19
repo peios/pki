@@ -12,9 +12,9 @@ use peios::registry::{Key, KeyAccess, OpenFlags, SecInfo, Transaction};
 use peios::security::{sddl, AceFlags, AceType, SdView};
 use pki_policy::defaults::{device_template, name_root, server_template};
 use pki_policy::{SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
-use pkid_core::SERVICE_SID;
+use pkid_core::{HTTPD_SERVICE_SID, SERVICE_SID};
 
-use crate::{KEYS_DIR, ROOT, STATE_DIR};
+use crate::{HTTP_DIR, KEYS_DIR, ROOT, STATE_DIR};
 
 fn error(error: peios::Error) -> io::Error {
     error.into()
@@ -54,10 +54,12 @@ fn private_directory(path: &str, dacl: &str) -> io::Result<()> {
 /// The database directory admits SYSTEM, Administrators and pkid: the
 /// database holds requests and certificates, nothing secret. The key
 /// directory admits pkid fully and lets SYSTEM and Administrators only list
-/// and pass through it; each key file in it is pkid's alone.
+/// and pass through it; each key file in it is pkid's alone. The published
+/// folder holds the CRLs pkid publishes, which pki-httpd may read.
 pub fn state_directories() -> io::Result<()> {
     private_directory(STATE_DIR, &state_dacl()).map_err(at(STATE_DIR))?;
-    private_directory(KEYS_DIR, &keys_dacl()).map_err(at(KEYS_DIR))
+    private_directory(KEYS_DIR, &keys_dacl()).map_err(at(KEYS_DIR))?;
+    private_directory(HTTP_DIR, &http_dacl()).map_err(at(HTTP_DIR))
 }
 
 /// The database directory's DACL. Its entries pass to the files created in
@@ -69,6 +71,14 @@ pub fn state_dacl() -> String {
 /// The key directory's DACL.
 pub fn keys_dacl() -> String {
     format!("D:P(A;;FRFX;;;SY)(A;;FRFX;;;BA)(A;OICI;FA;;;{SERVICE_SID})")
+}
+
+/// The published folder's DACL: pkid writes the CRLs it publishes, and
+/// pki-httpd may only read them.
+pub fn http_dacl() -> String {
+    format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{SERVICE_SID})(A;OICI;FR;;;{HTTPD_SERVICE_SID})"
+    )
 }
 
 /// pkid's own grant on `Authorities`, which the key also inherits to.

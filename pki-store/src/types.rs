@@ -157,3 +157,14 @@ pub struct CertificateFilter {
     /// At most this many; zero means no limit.
     pub limit: usize,
 }
+
+/// A CA's latest CRL.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Crl {
+    /// Increases with every CRL the CA signs.
+    pub number: u64,
+    pub this_update: OffsetDateTime,
+    pub next_update: OffsetDateTime,
+    /// The CRL as signed.
+    pub der: Vec<u8>,
+}
