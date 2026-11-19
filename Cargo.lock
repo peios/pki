@@ -494,6 +494,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "pki-pipeline"
+version = "0.1.0"
+dependencies = [
+ "peios-crypto",
+ "pki-core",
+ "pki-policy",
+ "pki-store",
+ "rcgen",
+ "time",
+ "x509-parser",
+]
+
+[[package]]
 name = "pki-policy"
 version = "0.1.0"
 dependencies = [

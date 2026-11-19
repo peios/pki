@@ -372,13 +372,16 @@ impl Store {
     pub fn certificates(&self, filter: &CertificateFilter) -> Result<Vec<Certificate>, StoreError> {
         let mut statement = self.connection.prepare(&format!(
             "{CERTIFICATE_COLUMNS}
+             JOIN requests q ON q.id = c.request
              WHERE (?1 IS NULL OR c.ca = ?1) AND (?2 IS NULL OR c.owner = ?2)
-               AND (NOT ?3 OR r.serial IS NULL) AND c.request > ?4
-             ORDER BY c.request LIMIT ?5"
+               AND (?3 IS NULL OR q.requester = ?3)
+               AND (NOT ?4 OR r.serial IS NULL) AND c.request > ?5
+             ORDER BY c.request LIMIT ?6"
         ))?;
         let mut rows = statement.query(params![
             filter.ca,
             filter.owner.as_ref().map(Sid::as_str),
+            filter.requester.as_ref().map(Sid::as_str),
             filter.unrevoked_only,
             filter.after.map_or(0, |id| id.0),
             limit(filter.limit),

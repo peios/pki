@@ -148,6 +148,8 @@ pub struct RequestFilter {
 pub struct CertificateFilter {
     pub ca: Option<String>,
     pub owner: Option<Sid>,
+    /// Only certificates whose requests this principal made.
+    pub requester: Option<Sid>,
     /// Leave out revoked certificates.
     pub unrevoked_only: bool,
     /// Only certificates whose requests come after this one.

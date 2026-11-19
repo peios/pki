@@ -91,6 +91,12 @@ impl<'a> IssuingCa<'a> {
         &self.certificate
     }
 
+    /// When the CA's own certificate is valid. Nothing it issues may
+    /// outlive it.
+    pub fn validity(&self) -> &Validity {
+        &self.facts.validity
+    }
+
     /// Issues an end-entity certificate for `subject_key`.
     ///
     /// The certificate is built only from `profile`. It is refused if it

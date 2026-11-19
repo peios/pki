@@ -1,0 +1,18 @@
+[package]
+name = "pki-pipeline"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+peios-crypto.workspace = true
+pki-core = { path = "../pki-core" }
+pki-policy = { path = "../pki-policy" }
+pki-store = { path = "../pki-store" }
+time.workspace = true
+
+[dev-dependencies]
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
+time = { workspace = true, features = ["macros"] }
+x509-parser.workspace = true
