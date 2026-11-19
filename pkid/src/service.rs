@@ -21,13 +21,7 @@ use crate::identity::LocalDirectory;
 use crate::keystore::ServiceKeyFiles;
 use crate::registry::{self, RegistryConfigurator};
 
-/// pkid's persistent state. An administrator provisions it; pkid doesn't
-/// create it, since peinit gives services no state directory of their own.
-pub const STATE_DIR: &str = "/var/state/pki";
-/// The CA database.
-pub const DATABASE: &str = "/var/state/pki/pkid.db";
-/// Online CA keys, readable by pkid's service identity alone.
-pub const KEYS_DIR: &str = "/var/state/pki/keys";
+pub use pki_management::{DATABASE, KEYS_DIR, STATE_DIR};
 
 /// How often pkid re-reads its configuration while it can't watch it.
 const REVALIDATE: Duration = Duration::from_secs(60);
@@ -122,6 +116,13 @@ pub fn refresh(state: &Mutex<State>, runtime: &Runtime) {
     let Ok(mut state) = state.lock() else {
         return;
     };
+    // pkid may have started before `pki setup` created its state directory;
+    // setup's Registry writes bring it here to try again.
+    if state.store.is_err() {
+        if let Ok(store) = Store::open(Path::new(DATABASE)) {
+            state.store = Ok(store);
+        }
+    }
     apply(&mut state, source, &runtime.services());
     if let Err(error) = &state.loaded {
         eprintln!("pkid: configuration: {error}");

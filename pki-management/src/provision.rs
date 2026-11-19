@@ -14,8 +14,7 @@ use pki_policy::defaults::{device_template, name_root, server_template};
 use pki_policy::{SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
 use pkid_core::SERVICE_SID;
 
-use crate::config::ROOT;
-use crate::service::{KEYS_DIR, STATE_DIR};
+use crate::{KEYS_DIR, ROOT, STATE_DIR};
 
 fn error(error: peios::Error) -> io::Error {
     error.into()

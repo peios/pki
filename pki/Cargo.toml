@@ -1,0 +1,21 @@
+[package]
+name = "pki"
+description = "The pki command: manage the Peios certificate authority."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "wrap_help"] }
+libc = "0.2"
+peios-crypto.workspace = true
+pem.workspace = true
+pki-keys = { path = "../pki-keys" }
+pki-management = { path = "../pki-management" }
+pkid-client = { path = "../pkid-client" }
+pkid-core = { path = "../pkid-core" }
+serde_json = "1"
+time = { workspace = true, features = ["formatting"] }
+x509-parser.workspace = true
+zeroize = "1.8"

@@ -2,9 +2,9 @@
 resolver = "2"
 members = [
     "pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store",
-    "pkid", "pkid-core", "pkid-client",
+    "pki", "pki-management", "pkid", "pkid-core", "pkid-client",
 ]
-# The portable crates. The pkid crates link libpeios, which pekit places for
+# The portable crates. pki and the pkid crates link libpeios, which pekit places for
 # them (`native_crates()` in build.gcsl); plain Cargo builds only these.
 default-members = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 

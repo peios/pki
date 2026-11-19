@@ -8,23 +8,7 @@ use pki_keys::KeyReference;
 use pki_pipeline::Configuration;
 use pki_policy::{NameNode, NamePolicy, NameTree, SecurityBlob, Template, TreeKind, Values};
 
-/// Where pkid's configuration lives.
-pub const ROOT: &str = "Machine\\Software\\Pki";
-
-/// The Registry under [`ROOT`], read in one snapshot.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Snapshot {
-    /// `Settings`, or nothing if the key is absent.
-    pub settings: Values,
-    /// `Templates\<guid>`, by GUID.
-    pub templates: Vec<(String, Values)>,
-    /// The nodes of `Names\Dns`, by their key path below it.
-    pub dns: Vec<(Vec<String>, Values)>,
-    /// The nodes of `Names\Principals`.
-    pub principals: Vec<(Vec<String>, Values)>,
-    /// `Authorities\<id>`, by identifier.
-    pub authorities: Vec<(String, Values)>,
-}
+pub use pki_management::{Snapshot, ROOT};
 
 /// What a configuration was loaded from: a Registry snapshot, or why the
 /// Registry couldn't be read.
