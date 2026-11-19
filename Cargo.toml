@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pki-core", "pki-keys", "pki-policy"]
+members = ["pki-core", "pki-keys", "pki-policy", "pki-store"]
 
 [workspace.package]
 version = "0.1.0"
@@ -17,6 +17,7 @@ publish = false
 peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "fcf9a9341dfcff28eece119dfaffcacf2b2abf62" }
 pem = "4"
 rcgen = { version = "=0.14.10", default-features = false, features = ["x509-parser"] }
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
 rustls-pki-types = "1.4.1"
 rustls-webpki = { version = "0.103", default-features = false, features = ["std", "alloc", "aws-lc-rs"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
