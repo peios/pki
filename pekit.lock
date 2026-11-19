@@ -23,6 +23,24 @@
       "git": "https://github.com/gcslib/buildenv",
       "dir": "",
       "rev": "HEAD"
+    },
+    {
+      "prefix": "github.com/gcslib/clang",
+      "git": "https://github.com/gcslib/clang",
+      "dir": "",
+      "rev": "HEAD"
+    },
+    {
+      "prefix": "github.com/peios/peios-rs",
+      "git": "https://github.com/peios/peios-rs",
+      "dir": "",
+      "rev": "fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
+    },
+    {
+      "prefix": "github.com/peios/peios-sdk",
+      "git": "https://github.com/peios/peios-sdk",
+      "dir": "",
+      "rev": "b373af600c192e0c1c89c40e6bca59f776bdb337"
     }
   ],
   "libraries": [
@@ -32,6 +50,13 @@
       "dir": "",
       "commit": "e194515d294871db9829a70fbc336ca9cf1972c3",
       "tree": "cc3338b6c040935a45ec23be20cd018a304f6662aadcdf15f37e704a9ac0f956"
+    },
+    {
+      "path": "github.com/gcslib/clang",
+      "git": "https://github.com/gcslib/clang",
+      "dir": "",
+      "commit": "4e0a0a349125c4daf347bdd7eabd1101ab9cae64",
+      "tree": "38e3d12d624e3d332ce63d4c07396be3a1eb4d8fab0c3cda8729d563f780af8f"
     },
     {
       "path": "github.com/gcslib/gcc",
@@ -53,6 +78,20 @@
       "dir": "",
       "commit": "08732a35010b83be3bd4b97a932d13ec5b7b39cb",
       "tree": "6a65b76477327b07374c88242b8a695eeb5016827cf3079003b2dcd282ee1d14"
+    },
+    {
+      "path": "github.com/peios/peios-rs",
+      "git": "https://github.com/peios/peios-rs",
+      "dir": "",
+      "commit": "fcf9a9341dfcff28eece119dfaffcacf2b2abf62",
+      "tree": "96f3638b600514506f347d6f56a08a7e7f3319dd5d238b1828579d6df012efce"
+    },
+    {
+      "path": "github.com/peios/peios-sdk",
+      "git": "https://github.com/peios/peios-sdk",
+      "dir": "",
+      "commit": "b373af600c192e0c1c89c40e6bca59f776bdb337",
+      "tree": "da1b6802c79f837b9fdaaf6258803b0983068bd5b3d52e6d61d0ad1ed8db4b29"
     }
   ]
 }

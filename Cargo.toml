@@ -1,6 +1,12 @@
 [workspace]
 resolver = "2"
-members = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
+members = [
+    "pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store",
+    "pkid-core", "pkid-client",
+]
+# The portable crates. The pkid crates link libpeios, which pekit places for
+# them (`native_crates()` in build.gcsl); plain Cargo builds only these.
+default-members = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 
 [workspace.package]
 version = "0.1.0"
@@ -15,6 +21,9 @@ publish = false
 # doesn't compile without a verify feature; pki never calls it. Tests enable
 # more where an independent implementation helps.
 peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "fcf9a9341dfcff28eece119dfaffcacf2b2abf62" }
+# The same commit as peios-crypto and as pekit.lock's peios-rs library, which
+# places libpeios for it: the rust library refuses a mismatch.
+peios = { git = "https://github.com/peios/peios-rs.git", rev = "fcf9a9341dfcff28eece119dfaffcacf2b2abf62" }
 pem = "4"
 rcgen = { version = "=0.14.10", default-features = false, features = ["x509-parser"] }
 rusqlite = { version = "=0.40.2", features = ["bundled"] }

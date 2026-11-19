@@ -1,0 +1,14 @@
+[package]
+name = "pkid-core"
+description = "pkid's control wire: paths, identity, and the request and reply codec."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+peios.workspace = true
+
+[dev-dependencies]
+peios.workspace = true
+sha1 = "0.10"

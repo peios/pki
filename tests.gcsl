@@ -1,4 +1,5 @@
 import "github.com/gcslib/rust"
+import "github.com/peios/peios-rs" as peios_rs
 
 def test unit(tests: List<rust.RustTest> = rust.tests(crates(), "pki-core")) {
     let each = for test in tests { = rust.run_test(test) }
@@ -20,14 +21,40 @@ def test pipeline(tests: List<rust.RustTest> = rust.tests(crates(), "pki-pipelin
     let each = for test in tests { = rust.run_test(test) }
 }
 
-def portable(): List<String> {
+# The pkid crates, with libpeios placed for them to load. The runtime is a
+# parameter default: building it fetches, which a test's body can't.
+def test wire(
+    tests: List<rust.RustTest> = rust.tests(native_crates(), "pkid-core"),
+    given: List<{at: String, place: Dir | File}> = peios_rs.runtime(),
+) {
+    let each = for test in tests {
+        = rust.run_test(test, given = given, env = peios_rs.runtime_env())
+    }
+}
+
+def test client(
+    tests: List<rust.RustTest> = rust.tests(native_crates(), "pkid-client"),
+    given: List<{at: String, place: Dir | File}> = peios_rs.runtime(),
+) {
+    let each = for test in tests {
+        = rust.run_test(test, given = given, env = peios_rs.runtime_env())
+    }
+}
+
+def portable() -> List<String> {
     = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 }
 
-def test clippy(checked: List<List<{}>> = for each in portable() {
-    = rust.clippy(crates(), each, flags = ["-Dwarnings"])
-}) {}
+def native() -> List<String> {
+    = ["pkid-core", "pkid-client"]
+}
 
-def test doctests(checked: List<List<{}>> = for each in portable() {
-    = rust.doctests(crates(), each)
-}) {}
+def test clippy(checked: List<List<{}>> = [
+    ...for each in portable() { = rust.clippy(crates(), each, flags = ["-Dwarnings"]) },
+    ...for each in native() { = rust.clippy(native_crates(), each, flags = ["-Dwarnings"]) },
+]) {}
+
+def test doctests(checked: List<List<{}>> = [
+    ...for each in portable() { = rust.doctests(crates(), each) },
+    ...for each in native() { = rust.doctests(native_crates(), each) },
+]) {}
