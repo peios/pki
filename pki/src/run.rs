@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use pki_keys::{KeyError, NewPassphrase};
+use pki_management::provision::Reservation;
 use pkid_core::{AuthorityInfo, Issuer, KeySpec, Passphrase, Reply, Request};
 use serde_json::json;
 use zeroize::Zeroizing;
@@ -47,11 +48,33 @@ fn setup(host: &dyn Host) -> Result<Output, Failure> {
     if seeded.authorities_key {
         text.push_str("Let pkid record the CAs created through it.\n");
     }
+    if seeded.http_key {
+        text.push_str("Let pki-httpd read its settings.\n");
+    }
+    match seeded.port {
+        Reservation::Added(port) => {
+            text.push_str(&format!("Reserved TCP port {port} for pki-httpd.\n"));
+        }
+        Reservation::Present => {}
+        Reservation::Taken(port) => host.warn(&format!(
+            "TCP port {port} is reserved for another service, so pki-httpd can't serve CRLs on it; set Machine\\Software\\Pki\\Http Port to another port, then run pki setup again"
+        )),
+        Reservation::NoTable => host.warn(
+            "this machine has no port reservation table, so pki-httpd may be unable to bind its port",
+        ),
+    }
     Ok(Output {
         json: json!({
             "templates_added": seeded.templates,
             "name_roots_added": seeded.name_roots,
             "authorities_key_added": seeded.authorities_key,
+            "http_key_added": seeded.http_key,
+            "port_reservation": match seeded.port {
+                Reservation::Added(port) => json!({"added": port}),
+                Reservation::Present => json!("present"),
+                Reservation::Taken(port) => json!({"taken": port}),
+                Reservation::NoTable => json!("no-table"),
+            },
         }),
         text,
     })

@@ -209,9 +209,20 @@ create its state directories under
 .IR /var/state/pki ,
 and seed its configuration in the Registry under
 .BR Machine\eSoftware\ePki :
-the Server and Device templates if there are no templates, the roots of the name trees, and the key where
+the Server and Device templates if there are no templates, the roots of the name trees, the key where
 .B pkid
-records the CAs created through it.
+records the CAs created through it, and
+.BR pki\-httpd 's
+settings.
+It also reserves
+.BR pki\-httpd 's
+TCP port for it, 80 unless
+.B Machine\eSoftware\ePki\eHttp Port
+says otherwise, unless another service has reserved exactly that port: then it warns, and
+.B pki\-httpd
+can't serve CRLs until you choose another port and run
+.B setup
+again.
 .B setup
 only adds what is missing.
 It never replaces a value an administrator has set, so it is safe to run again.
@@ -1062,6 +1073,7 @@ Let the RADIUS server's principal request its own name without approval, through
 Revoke a certificate whose key was exposed.
 .SH SEE ALSO
 .BR regman (1),
+.BR pki\-httpd (8),
 .BR pkid (8)
 .PP
 https://learn.peios.org/peios/using-peios/certificate-authority/overview

@@ -1,0 +1,13 @@
+[package]
+name = "pki-httpd"
+description = "Serves the CRLs pkid publishes over HTTP."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+libc = "0.2"
+peios.workspace = true
+pki-management = { path = "../pki-management" }
+pkid-core = { path = "../pkid-core" }

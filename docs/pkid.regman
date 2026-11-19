@@ -353,3 +353,22 @@ pkid warns from 30 days before it expires (`pkid.crl.expiring`).
 
 Each CRL is published at the path of each of the CA's http
 CrlDistributionPoints, under /var/state/pki/http, for pki-httpd to serve.
+
+--- machine\software\pki\http
+canonical: Machine\Software\Pki\Http
+
+Settings for pki-httpd, which serves the CRLs pkid publishes. pki-httpd's
+service account may read this key and nothing else here.
+
+--- machine\software\pki\http port
+canonical: Machine\Software\Pki\Http Port
+type: REG_DWORD
+default: 80
+valid: 1–65535
+applies: restart of pki-httpd
+
+The TCP port pki-httpd serves CRLs on. Binding it needs a reservation in
+Machine\System\Network\TcpIp\PortReservations that grants pki-httpd;
+`pki setup` adds one for this port unless another reservation of exactly
+that port exists, which it never replaces. Run `pki setup` again after
+changing the port.

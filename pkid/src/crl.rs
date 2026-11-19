@@ -41,32 +41,9 @@ pub struct Publication {
 }
 
 /// The URL path of an `http` distribution point, as a relative file path,
-/// or nothing for one this publisher can't serve. Only plain path segments
-/// are accepted, so a path can never leave the folder it is served from.
+/// or nothing for one this publisher can't serve.
 pub fn http_path(url: &str) -> Option<PathBuf> {
-    let rest = url
-        .get(..7)
-        .filter(|scheme| scheme.eq_ignore_ascii_case("http://"))
-        .map(|_| &url[7..])?;
-    let (_, path) = rest.split_once('/')?;
-    if path.is_empty() || path.contains(['?', '#', '%', '\\']) {
-        return None;
-    }
-    let mut relative = PathBuf::new();
-    for segment in path.split('/') {
-        let plain = !segment.is_empty()
-            && segment != "."
-            && segment != ".."
-            && !segment.starts_with('.')
-            && segment
-                .bytes()
-                .all(|byte| byte.is_ascii_alphanumeric() || b"._-~".contains(&byte));
-        if !plain {
-            return None;
-        }
-        relative.push(segment);
-    }
-    Some(relative)
+    pki_management::http::url_path(url)
 }
 
 /// Publishes CRLs as files under a folder, at the URL paths of their CAs'
@@ -366,37 +343,5 @@ pub fn after_revocation(
             "pkid: CA {ca_id}'s CRL after a revocation: {}",
             error.message
         );
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn only_plain_http_paths_are_published() {
-        assert_eq!(
-            http_path("http://pki.home/crl/issuing.crl"),
-            Some(PathBuf::from("crl/issuing.crl"))
-        );
-        assert_eq!(
-            http_path("HTTP://pki.home:8080/root.crl"),
-            Some(PathBuf::from("root.crl"))
-        );
-        for refused in [
-            "https://pki.home/root.crl",
-            "ldap://pki.home/cn=root",
-            "http://pki.home",
-            "http://pki.home/",
-            "http://pki.home/../etc/passwd",
-            "http://pki.home/crl/./root.crl",
-            "http://pki.home/crl//root.crl",
-            "http://pki.home/.hidden",
-            "http://pki.home/root.crl?x=1",
-            "http://pki.home/root%2Ecrl",
-            "http://pki.home/a\\b.crl",
-        ] {
-            assert_eq!(http_path(refused), None, "{refused}");
-        }
     }
 }

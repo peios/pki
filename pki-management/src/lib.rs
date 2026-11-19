@@ -6,6 +6,7 @@
 //! `pkid.regman`). It writes only its CA records; templates, names and
 //! provisioning are an administrator's, through this crate.
 
+pub mod http;
 pub mod names;
 pub mod provision;
 pub mod registry;
