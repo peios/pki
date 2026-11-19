@@ -17,10 +17,11 @@ use std::time::Duration;
 use peios::security::Sid;
 use peios::token::Token;
 use pkid_core::{
-    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, FrameError, Reply,
-    Request, RequestInfo, RequestQuery, SubmissionInfo, WireError, MAX_REPLY_BYTES, SERVICE_SID,
-    SOCKET_PATH,
+    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, FrameError,
+    Passphrase, Reply, Request, RequestInfo, RequestQuery, SubmissionInfo, WireError,
+    MAX_REPLY_BYTES, SERVICE_SID, SOCKET_PATH,
 };
+use zeroize::Zeroizing;
 
 /// How long a call may wait on pkid before giving up.
 const TIMEOUT: Duration = Duration::from_secs(30);
@@ -180,6 +181,41 @@ impl Client {
         }
     }
 
+    /// Creates, installs, imports or changes a CA: any request whose reply
+    /// is the CA as it now stands.
+    pub fn manage(&self, request: &Request) -> Result<AuthorityInfo, ClientError> {
+        match self.call(request)? {
+            Reply::Authority(authority) => Ok(authority),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Signs a subordinate CA's request for a CA elsewhere, returning its
+    /// DER certificate.
+    pub fn sign_subordinate(&self, request: &Request) -> Result<Vec<u8>, ClientError> {
+        match self.call(request)? {
+            Reply::Signed(certificate) => Ok(certificate),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// Exports a CA's key as a sealed key file.
+    pub fn export_key(
+        &self,
+        ca: &str,
+        current: Option<Passphrase>,
+        passphrase: Passphrase,
+    ) -> Result<Vec<u8>, ClientError> {
+        match self.call(&Request::ExportKey {
+            ca: ca.into(),
+            current,
+            passphrase,
+        })? {
+            Reply::SealedKey(sealed) => Ok(sealed),
+            other => Err(unexpected(&other)),
+        }
+    }
+
     fn submission(&self, request: &Request) -> Result<SubmissionInfo, ClientError> {
         match self.call(request)? {
             Reply::Submission(submission) => Ok(submission),
@@ -218,9 +254,12 @@ fn verify_server(stream: &UnixStream) -> Result<(), ClientError> {
 
 /// One request and its reply over an established connection.
 pub fn exchange(stream: &mut (impl Read + Write), request: &Request) -> Result<Reply, ClientError> {
-    let payload = request
-        .encode()
-        .map_err(|error| ClientError::Protocol(error.to_string()))?;
+    // The request may carry passphrases, so its encoding is wiped once sent.
+    let payload = Zeroizing::new(
+        request
+            .encode()
+            .map_err(|error| ClientError::Protocol(error.to_string()))?,
+    );
     write_frame(stream, &payload).map_err(ClientError::Io)?;
     let reply = read_frame(stream, MAX_REPLY_BYTES).map_err(|error| match error {
         FrameError::TooLarge(length) => {

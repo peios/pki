@@ -652,6 +652,7 @@ version = "0.1.0"
 dependencies = [
  "peios",
  "pkid-core",
+ "zeroize",
 ]
 
 [[package]]
@@ -660,6 +661,7 @@ version = "0.1.0"
 dependencies = [
  "peios",
  "sha1",
+ "zeroize",
 ]
 
 [[package]]

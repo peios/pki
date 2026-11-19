@@ -12,6 +12,7 @@ use std::time::Duration;
 use peios::file::SecInfo;
 use peios::security::{AccessMask, AceFlags, AclBuilder, SdBuilder, Sid, WellKnown};
 use peios::token::{Token, TokenAccess};
+use peios_crypto::Secret;
 use pkid_core::{
     read_frame, write_frame, ErrorCode, FrameError, Reply, Request, WireError, MAX_REQUEST_BYTES,
     RUN_DIR, SOCKET_PATH,
@@ -19,8 +20,8 @@ use pkid_core::{
 use time::OffsetDateTime;
 
 use crate::dispatch::{handle, State};
-use crate::events::EventLog;
-use crate::identity::{Caller, LocalDirectory};
+use crate::identity::Caller;
+use crate::service::Runtime;
 
 /// How long a client has to deliver its request, and to take its reply.
 const CLIENT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -97,7 +98,11 @@ fn protect(path: &Path, socket: bool) {
 }
 
 /// Serves connections until the listener fails, each on its own thread.
-pub fn serve(listener: UnixListener, state: Arc<Mutex<State>>) -> io::Result<()> {
+pub fn serve(
+    listener: UnixListener,
+    state: Arc<Mutex<State>>,
+    runtime: Arc<Runtime>,
+) -> io::Result<()> {
     let active = Arc::new(AtomicUsize::new(0));
     loop {
         let (stream, _) = match listener.accept() {
@@ -110,9 +115,10 @@ pub fn serve(listener: UnixListener, state: Arc<Mutex<State>>) -> io::Result<()>
             continue;
         }
         let state = Arc::clone(&state);
+        let runtime = Arc::clone(&runtime);
         let active = Arc::clone(&active);
         std::thread::spawn(move || {
-            connection(stream, &state);
+            connection(stream, &state, &runtime);
             active.fetch_sub(1, Ordering::SeqCst);
         });
     }
@@ -120,7 +126,7 @@ pub fn serve(listener: UnixListener, state: Arc<Mutex<State>>) -> io::Result<()>
 
 /// One request and its reply. A caller whose identity can't be read is
 /// closed on without a reply (PSPU §4.6).
-fn connection(mut stream: UnixStream, state: &Mutex<State>) {
+fn connection(mut stream: UnixStream, state: &Mutex<State>, runtime: &Runtime) {
     let token = match Token::open_peer(stream.as_fd()) {
         Ok(token) => token,
         Err(error) => {
@@ -135,7 +141,9 @@ fn connection(mut stream: UnixStream, state: &Mutex<State>) {
         return;
     }
     let reply = match read_frame(&mut stream, MAX_REQUEST_BYTES) {
-        Ok(payload) => answer(&payload, token, state),
+        // The request may carry passphrases, so its bytes are wiped once
+        // decoded.
+        Ok(payload) => answer(Secret::new(payload).expose(), token, state, runtime),
         Err(FrameError::TooLarge(length)) => Err(WireError::new(
             ErrorCode::BadRequest,
             format!("a {length}-byte request is too large"),
@@ -150,7 +158,12 @@ fn connection(mut stream: UnixStream, state: &Mutex<State>) {
     }
 }
 
-fn answer(payload: &[u8], token: Token, state: &Mutex<State>) -> Result<Reply, WireError> {
+fn answer(
+    payload: &[u8],
+    token: Token,
+    state: &Mutex<State>,
+    runtime: &Runtime,
+) -> Result<Reply, WireError> {
     let request = Request::decode(payload)
         .map_err(|error| WireError::new(ErrorCode::BadRequest, error.to_string()))?;
     let caller = Caller::new(token)
@@ -162,8 +175,7 @@ fn answer(payload: &[u8], token: Token, state: &Mutex<State>) -> Result<Reply, W
         &mut state,
         request,
         &caller,
-        &LocalDirectory,
-        &EventLog,
+        &runtime.services(),
         OffsetDateTime::now_utc(),
     )
 }

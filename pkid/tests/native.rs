@@ -18,6 +18,7 @@ fn every_descriptor_pkid_builds_parses() {
     let keys = ServiceKeyFiles::new(Path::new(service::KEYS_DIR), SERVICE_SID);
     for text in [
         DEFAULT_CA_SDDL.to_string(),
+        pkid::config::DEFAULT_MANAGE_SDDL.to_string(),
         DEFAULT_NAME_ROOT_SDDL.to_string(),
         DEFAULT_TEMPLATE_ENROLL_SDDL.to_string(),
         keys.file_descriptor(),
@@ -27,8 +28,8 @@ fn every_descriptor_pkid_builds_parses() {
     ] {
         sddl::parse(&text).unwrap_or_else(|error| panic!("{text}: {error}"));
     }
-    // Startup takes this one on trust.
-    service::default_ca_security();
+    // Startup takes these on trust.
+    service::defaults();
 }
 
 #[test]

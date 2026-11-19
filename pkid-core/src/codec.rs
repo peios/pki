@@ -144,6 +144,26 @@ impl<'a> Fields<'a> {
         Ok(Reader::new(self.required(key)?).read_bin()?)
     }
 
+    pub(crate) fn opt_bin(&self, key: &str) -> Result<Option<&'a [u8]>, CodecError> {
+        self.optional(key)
+            .map(|value| Reader::new(value).read_bin().map_err(CodecError::from))
+            .transpose()
+    }
+
+    pub(crate) fn opt_uint(&self, key: &str) -> Result<Option<u64>, CodecError> {
+        self.optional(key)
+            .map(|value| Reader::new(value).read_uint().map_err(CodecError::from))
+            .transpose()
+    }
+
+    /// The strings at `key`, or none if it is missing or nil.
+    pub(crate) fn opt_strings(&self, key: &str) -> Result<Option<Vec<String>>, CodecError> {
+        if self.optional(key).is_none() {
+            return Ok(None);
+        }
+        self.strings(key).map(Some)
+    }
+
     pub(crate) fn int(&self, key: &str) -> Result<i64, CodecError> {
         Ok(Reader::new(self.required(key)?).read_int()?)
     }
@@ -243,10 +263,31 @@ impl MapWriter {
         })
     }
 
+    pub(crate) fn opt_bin(&mut self, key: &str, value: Option<&[u8]>) -> &mut Self {
+        if let Some(value) = value {
+            self.bin(key, value);
+        }
+        self
+    }
+
     pub(crate) fn int(&mut self, key: &str, value: i64) -> &mut Self {
         self.put(key, |writer| {
             writer.write_int(value);
         })
+    }
+
+    pub(crate) fn opt_uint(&mut self, key: &str, value: Option<u64>) -> &mut Self {
+        if let Some(value) = value {
+            self.uint(key, value);
+        }
+        self
+    }
+
+    pub(crate) fn opt_strings(&mut self, key: &str, values: Option<&[String]>) -> &mut Self {
+        if let Some(values) = values {
+            self.strings(key, values);
+        }
+        self
     }
 
     pub(crate) fn opt_int(&mut self, key: &str, value: Option<i64>) -> &mut Self {

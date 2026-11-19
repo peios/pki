@@ -2,8 +2,9 @@
 
 use pkid_core::{
     read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, ErrorCode,
-    FrameError, Outcome, Reply, Request, RequestInfo, RequestQuery, RequestStatus, RevocationInfo,
-    SubmissionInfo, TemplateInfo, WireError, MAX_LISTING, SERVICE_NAME, SERVICE_SID,
+    FrameError, Issuer, KeySpec, Outcome, Passphrase, Reply, Request, RequestInfo, RequestQuery,
+    RequestStatus, RevocationInfo, SubmissionInfo, TemplateInfo, WireError, MAX_LISTING,
+    SERVICE_NAME, SERVICE_SID,
 };
 use sha1::{Digest, Sha1};
 
@@ -90,6 +91,102 @@ fn requests_round_trip() {
 }
 
 #[test]
+fn management_requests_round_trip() {
+    let service_key = KeySpec {
+        provider: "service".into(),
+        locator: None,
+        algorithm: Some("ecdsa-p384".into()),
+        exportable: true,
+        passphrase: None,
+    };
+    let file_key = KeySpec {
+        provider: "file".into(),
+        locator: Some("/media/usb/root.key".into()),
+        algorithm: Some("rsa-4096".into()),
+        exportable: true,
+        passphrase: Some(Passphrase::new(b"correct horse battery staple".to_vec())),
+    };
+    let requests = [
+        Request::CreateAuthority {
+            name: "Home Root CA".into(),
+            key: file_key.clone(),
+            issuer: Issuer::SelfSigned,
+            lifetime_days: 7300,
+            path_length: Some(1),
+            templates: Vec::new(),
+            crl_distribution_points: Vec::new(),
+        },
+        Request::CreateAuthority {
+            name: "Home Issuing CA".into(),
+            key: service_key.clone(),
+            issuer: Issuer::Authority {
+                ca: "root".into(),
+                passphrase: Some(Passphrase::new(b"root passphrase".to_vec())),
+            },
+            lifetime_days: 1825,
+            path_length: Some(0),
+            templates: vec!["server".into()],
+            crl_distribution_points: vec!["http://pki.home/issuing.crl".into()],
+        },
+        Request::CreateAuthority {
+            name: "Lab CA".into(),
+            key: service_key.clone(),
+            issuer: Issuer::Offline,
+            lifetime_days: 1825,
+            path_length: None,
+            templates: Vec::new(),
+            crl_distribution_points: Vec::new(),
+        },
+        Request::SignSubordinate {
+            ca: "root".into(),
+            csr: vec![0x30, 0x01],
+            name: "Lab CA".into(),
+            lifetime_days: 1825,
+            path_length: Some(0),
+            passphrase: None,
+        },
+        Request::InstallAuthority {
+            ca: "lab".into(),
+            certificate: vec![0x30, 0x02],
+        },
+        Request::ImportAuthority {
+            name: "Old Root".into(),
+            certificate: vec![0x30, 0x03],
+            sealed_key: b"PEIOSKEY".to_vec(),
+            passphrase: Passphrase::new(b"backup passphrase".to_vec()),
+            key: service_key,
+            templates: Vec::new(),
+            crl_distribution_points: Vec::new(),
+        },
+        Request::ExportKey {
+            ca: "issuing".into(),
+            current: None,
+            passphrase: Passphrase::new(b"a long backup passphrase".to_vec()),
+        },
+        Request::ConfigureAuthority {
+            ca: "issuing".into(),
+            templates: Some(vec!["server".into(), "device".into()]),
+            crl_distribution_points: None,
+        },
+    ];
+    for request in requests {
+        let decoded = Request::decode(&request.encode().unwrap()).unwrap();
+        assert_eq!(decoded, request);
+    }
+}
+
+#[test]
+fn passphrases_are_never_printed() {
+    let request = Request::ExportKey {
+        ca: "issuing".into(),
+        current: Some(Passphrase::new(b"the current secret".to_vec())),
+        passphrase: Passphrase::new(b"the new secret".to_vec()),
+    };
+    let printed = format!("{request:?}");
+    assert!(!printed.contains("secret"), "{printed}");
+}
+
+#[test]
 fn listings_are_capped() {
     let request = Request::Requests {
         ca: "issuing".into(),
@@ -139,16 +236,31 @@ fn request_info(status: RequestStatus) -> RequestInfo {
 fn replies_round_trip() {
     let replies: Vec<Result<Reply, WireError>> = vec![
         Ok(Reply::Done),
-        Ok(Reply::Authorities(vec![AuthorityInfo {
-            id: "issuing".into(),
-            name: "Home Issuing CA".into(),
-            certificate: vec![0x30, 0x01],
-            templates: vec![TemplateInfo {
-                id: "server".into(),
-                name: "Server".into(),
-            }],
-            key_available: true,
-        }])),
+        Ok(Reply::Authorities(vec![
+            AuthorityInfo {
+                id: "issuing".into(),
+                name: "Home Issuing CA".into(),
+                certificate: Some(vec![0x30, 0x01]),
+                request: None,
+                key: "service:issuing".into(),
+                templates: vec![TemplateInfo {
+                    id: "server".into(),
+                    name: "Server".into(),
+                }],
+                key_available: true,
+            },
+            AuthorityInfo {
+                id: "lab".into(),
+                name: "Lab CA".into(),
+                certificate: None,
+                request: Some(vec![0x30, 0x02]),
+                key: "service:lab".into(),
+                templates: Vec::new(),
+                key_available: true,
+            },
+        ])),
+        Ok(Reply::Signed(vec![0x30, 0x03])),
+        Ok(Reply::SealedKey(b"PEIOSKEY".to_vec())),
         Ok(Reply::Submission(SubmissionInfo {
             request: 4,
             outcome: Outcome::Issued(vec![0x30, 0x02]),

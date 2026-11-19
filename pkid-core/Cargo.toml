@@ -8,6 +8,7 @@ publish.workspace = true
 
 [dependencies]
 peios.workspace = true
+zeroize = "1.8"
 
 [dev-dependencies]
 peios.workspace = true

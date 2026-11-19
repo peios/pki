@@ -20,7 +20,7 @@ mod profile;
 mod request;
 mod usage;
 
-pub use ca::{create_root, Certificate, IssuingCa};
+pub use ca::{ca_request, create_root, Certificate, IssuingCa};
 pub use crl::{CrlProfile, RevocationList, RevocationReason, RevokedCertificate};
 pub use error::Error;
 pub use key::{
@@ -34,5 +34,5 @@ pub use names::{
 pub use profile::{
     CaProfile, CaSubject, CommonName, DisplayName, LeafProfile, LeafSubject, SerialNumber, Validity,
 };
-pub use request::CertificateRequest;
+pub use request::{ca_request_key, CertificateRequest};
 pub use usage::{ExtendedKeyUsage, ExtendedKeyUsages, KeyUsage, UsageOid};

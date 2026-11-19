@@ -13,6 +13,7 @@ pub mod dispatch;
 pub mod events;
 pub mod identity;
 pub mod keystore;
+pub mod manage;
 pub mod provision;
 pub mod registry;
 pub mod server;

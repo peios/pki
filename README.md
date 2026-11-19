@@ -29,6 +29,14 @@ its control socket, authorizing each against the caller's token. Its events
 are described in [pkid.evman](docs/pkid.evman). An administrator provisions
 its state directories and default configuration (`pkid::provision`).
 
+CAs are created through pkid, which makes their keys and certificates and
+records them under `Authorities`: roots, subordinates of a CA on the same
+pkid, and subordinates signed elsewhere, which await their certificate until
+it is installed. pkid can also sign a subordinate's request for a CA
+elsewhere, import a CA from a sealed key file, and export a CA's key. A key
+sealed under a passphrase is never kept open; each operation that signs with
+one takes its passphrase.
+
 `pkid-core` is pkid's control wire, a PSPU §3.15 channel at
 `/run/pkid/pki.sock`, and `pkid-client` is the client the `pki` command and
 window use. They link libpeios.
