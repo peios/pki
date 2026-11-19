@@ -2,10 +2,15 @@
 
 use std::net::IpAddr;
 
+use peios_crypto::digest::Algorithm as Hash;
+use peios_crypto::VerificationAlgorithm;
 use x509_parser::certification_request::X509CertificationRequest;
 use x509_parser::der_parser::der::parse_der_utf8string;
+use x509_parser::der_parser::oid::Oid;
 use x509_parser::extensions::{GeneralName, ParsedExtension};
 use x509_parser::prelude::FromDer;
+use x509_parser::signature_algorithm::SignatureAlgorithm;
+use x509_parser::x509::AlgorithmIdentifier;
 
 use crate::key::{oid_arcs, SubjectPublicKey};
 use crate::names::{AltName, DnsName, Mailbox, UserPrincipalName};
@@ -14,6 +19,18 @@ use crate::Error;
 const PEM_LABEL: &str = "CERTIFICATE REQUEST";
 const NEW_PEM_LABEL: &str = "NEW CERTIFICATE REQUEST";
 pub(crate) const OID_USER_PRINCIPAL_NAME: &[u64] = &[1, 3, 6, 1, 4, 1, 311, 20, 2, 3];
+
+const OID_ECDSA_SHA256: &[u64] = &[1, 2, 840, 10045, 4, 3, 2];
+const OID_ECDSA_SHA384: &[u64] = &[1, 2, 840, 10045, 4, 3, 3];
+const OID_ECDSA_SHA512: &[u64] = &[1, 2, 840, 10045, 4, 3, 4];
+const OID_RSA_SHA256: &[u64] = &[1, 2, 840, 113549, 1, 1, 11];
+const OID_RSA_SHA384: &[u64] = &[1, 2, 840, 113549, 1, 1, 12];
+const OID_RSA_SHA512: &[u64] = &[1, 2, 840, 113549, 1, 1, 13];
+const OID_RSA_PSS: &[u64] = &[1, 2, 840, 113549, 1, 1, 10];
+const OID_MGF1: &[u64] = &[1, 2, 840, 113549, 1, 1, 8];
+const OID_SHA256: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 2, 1];
+const OID_SHA384: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 2, 2];
+const OID_SHA512: &[u64] = &[2, 16, 840, 1, 101, 3, 4, 2, 3];
 
 /// A verified PKCS #10 certificate signing request.
 ///
@@ -37,11 +54,17 @@ impl CertificateRequest {
                 "trailing bytes after the request".into(),
             ));
         }
-        request
-            .verify_signature()
-            .map_err(|_| Error::InvalidRequestSignature)?;
         let info = &request.certification_request_info;
         let subject_key = SubjectPublicKey::from_der(info.subject_pki.raw)?;
+        let algorithm = signature_algorithm(&request.signature_algorithm)?;
+        subject_key
+            .verifying_key()
+            .verify(algorithm, info.raw, &request.signature_value.data)
+            .map_err(|error| match error {
+                peios_crypto::Error::VerificationFailed
+                | peios_crypto::Error::IncompatibleScheme => Error::InvalidRequestSignature,
+                error => Error::Crypto(error),
+            })?;
 
         let mut names = Vec::new();
         for extension in request.requested_extensions().into_iter().flatten() {
@@ -88,6 +111,62 @@ impl CertificateRequest {
     /// name, without duplicates. Policy must approve each before issuing.
     pub fn names(&self) -> &[AltName] {
         &self.names
+    }
+}
+
+/// How a request was signed, for the algorithms peios-crypto verifies:
+/// ECDSA and RSA PKCS #1 v1.5 with SHA-2, and RSA-PSS whose parameters
+/// match peios-crypto's, the hash's own MGF1 and a salt as long as the hash.
+/// Others, including SHA-1, are refused until crypto policy grades them.
+fn signature_algorithm(
+    identifier: &AlgorithmIdentifier<'_>,
+) -> Result<VerificationAlgorithm, Error> {
+    let unsupported = || {
+        Error::UnsupportedSignature(format!(
+            "requests signed with {} are not accepted",
+            identifier.algorithm
+        ))
+    };
+    let oid = oid_arcs(&identifier.algorithm)?;
+    let algorithm = match oid.as_slice() {
+        OID_ECDSA_SHA256 => VerificationAlgorithm::Ecdsa(Hash::Sha256),
+        OID_ECDSA_SHA384 => VerificationAlgorithm::Ecdsa(Hash::Sha384),
+        OID_ECDSA_SHA512 => VerificationAlgorithm::Ecdsa(Hash::Sha512),
+        OID_RSA_SHA256 => VerificationAlgorithm::RsaPkcs1(Hash::Sha256),
+        OID_RSA_SHA384 => VerificationAlgorithm::RsaPkcs1(Hash::Sha384),
+        OID_RSA_SHA512 => VerificationAlgorithm::RsaPkcs1(Hash::Sha512),
+        OID_RSA_PSS => {
+            let Ok(SignatureAlgorithm::RSASSA_PSS(parameters)) =
+                SignatureAlgorithm::try_from(identifier)
+            else {
+                return Err(Error::MalformedRequest(
+                    "malformed RSA-PSS parameters".into(),
+                ));
+            };
+            let hash = hash_of(parameters.hash_algorithm_oid()).ok_or_else(unsupported)?;
+            let mask = parameters
+                .mask_gen_algorithm()
+                .map_err(|_| Error::MalformedRequest("malformed RSA-PSS parameters".into()))?;
+            let consistent = oid_arcs(&mask.mgf)? == OID_MGF1
+                && hash_of(&mask.hash) == Some(hash)
+                && usize::try_from(parameters.salt_length()).ok() == Some(hash.output_len())
+                && parameters.trailer_field() == 1;
+            if !consistent {
+                return Err(unsupported());
+            }
+            VerificationAlgorithm::RsaPss(hash)
+        }
+        _ => return Err(unsupported()),
+    };
+    Ok(algorithm)
+}
+
+fn hash_of(oid: &Oid<'_>) -> Option<Hash> {
+    match oid_arcs(oid).ok()?.as_slice() {
+        OID_SHA256 => Some(Hash::Sha256),
+        OID_SHA384 => Some(Hash::Sha384),
+        OID_SHA512 => Some(Hash::Sha512),
+        _ => None,
     }
 }
 

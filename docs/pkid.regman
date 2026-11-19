@@ -102,7 +102,7 @@ How many days before expiry renewal becomes due.
 canonical: Machine\Software\Pki\Templates\<guid> KeyAlgorithms
 type: REG_MULTI_SZ
 default: (required)
-valid: one or more of ecdsa-p256, ecdsa-p384, rsa-N with N from 2048 to 16384
+valid: one or more of ecdsa-p256, ecdsa-p384, rsa-N with N from 2048 to 8192
 applies: new requests
 
 The keys a request may contain. rsa-N accepts RSA keys of at least N bits.
