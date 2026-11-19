@@ -48,14 +48,23 @@ fn private_directory(path: &str, dacl: &str) -> io::Result<()> {
 /// directory admits pkid fully and lets SYSTEM and Administrators only list
 /// and pass through it; each key file in it is pkid's alone.
 pub fn state_directories() -> io::Result<()> {
-    private_directory(
-        STATE_DIR,
-        &format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{SERVICE_SID})"),
-    )?;
-    private_directory(
-        KEYS_DIR,
-        &format!("D:P(A;;GRGX;;;SY)(A;;GRGX;;;BA)(A;;GA;;;{SERVICE_SID})"),
-    )
+    private_directory(STATE_DIR, &state_dacl())?;
+    private_directory(KEYS_DIR, &keys_dacl())
+}
+
+/// The database directory's DACL.
+pub fn state_dacl() -> String {
+    format!("D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GA;;;{SERVICE_SID})")
+}
+
+/// The key directory's DACL.
+pub fn keys_dacl() -> String {
+    format!("D:P(A;;GRGX;;;SY)(A;;GRGX;;;BA)(A;;GA;;;{SERVICE_SID})")
+}
+
+/// pkid's own grant on `Authorities`, which the key also inherits to.
+pub fn authorities_grant() -> String {
+    format!("O:SYG:SYD:(A;CI;GA;;;{SERVICE_SID})")
 }
 
 /// A new template GUID.
@@ -169,7 +178,7 @@ pub fn registry() -> io::Result<Seeded> {
         .map_err(error)?
         .get_security_transacted(SecInfo::DACL, Some(&transaction))
         .map_err(error)?;
-        let own = sddl::parse(&format!("O:SYG:SYD:(A;CI;GA;;;{SERVICE_SID})")).map_err(error)?;
+        let own = sddl::parse(&authorities_grant()).map_err(error)?;
         let descriptor = sddl::reinherit(parent.as_bytes(), own.as_bytes(), true).map_err(error)?;
         authorities
             .set_security(SecInfo::DACL, &descriptor, Some(&transaction))

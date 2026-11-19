@@ -184,6 +184,7 @@ fn state(key: PrivateKey, certificate: &[u8]) -> State {
         store: Ok(Store::memory().unwrap()),
         loaded: Ok(loaded),
         keys,
+        source: None,
     }
 }
 

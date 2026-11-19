@@ -19,7 +19,7 @@ use pkid_core::{
 };
 use time::OffsetDateTime;
 
-use crate::config::{AuthorityConfig, Loaded};
+use crate::config::{AuthorityConfig, Loaded, Source};
 
 /// Something pkid records in its audit trail.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -63,6 +63,8 @@ pub struct State {
     /// Each CA's opened key, by CA identifier. A CA whose key is
     /// unavailable or locked has none.
     pub keys: HashMap<String, OpenKey>,
+    /// What `loaded` came from, so an unchanged Registry isn't loaded again.
+    pub source: Option<Source>,
 }
 
 /// Handles one request for `caller`.

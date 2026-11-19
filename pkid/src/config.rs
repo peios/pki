@@ -26,6 +26,10 @@ pub struct Snapshot {
     pub authorities: Vec<(String, Values)>,
 }
 
+/// What a configuration was loaded from: a Registry snapshot, or why the
+/// Registry couldn't be read.
+pub type Source = Result<Snapshot, String>;
+
 /// A CA as configured.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AuthorityConfig {

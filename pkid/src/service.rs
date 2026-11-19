@@ -14,7 +14,7 @@ use pki_policy::SecurityBlob;
 use pki_store::Store;
 use pkid_core::SERVICE_SID;
 
-use crate::config::{self, Loaded};
+use crate::config::{self, Loaded, Source};
 use crate::dispatch::State;
 use crate::events;
 use crate::keystore::ServiceKeyFiles;
@@ -53,9 +53,13 @@ pub fn providers() -> KeyProviders {
     providers
 }
 
-fn read_configuration() -> Result<Loaded, String> {
-    let snapshot = registry::read().map_err(|error| format!("reading the Registry: {error}"))?;
-    config::load(&snapshot, &default_ca_security()).map_err(|error| error.to_string())
+fn read_source() -> Source {
+    registry::read().map_err(|error| format!("reading the Registry: {error}"))
+}
+
+fn interpret(source: &Source) -> Result<Loaded, String> {
+    let snapshot = source.as_ref().map_err(Clone::clone)?;
+    config::load(snapshot, &default_ca_security()).map_err(|error| error.to_string())
 }
 
 /// Opens the keys of `loaded`'s CAs that need no passphrase, keeping those
@@ -92,37 +96,36 @@ fn open_keys(
     keys
 }
 
-/// pkid's state as it starts.
-pub fn start(providers: &KeyProviders) -> State {
+/// pkid's state as it starts, with its configuration loaded.
+pub fn start(providers: &KeyProviders) -> Arc<Mutex<State>> {
     let store = Store::open(Path::new(DATABASE)).map_err(|error| error.to_string());
     if let Err(error) = &store {
         eprintln!("pkid: the CA database: {error}");
     }
-    let loaded = read_configuration();
-    events::configuration_loaded(loaded.as_ref().err().map(String::as_str));
-    let keys = match &loaded {
-        Ok(loaded) => open_keys(loaded, None, HashMap::new(), providers),
-        Err(error) => {
-            eprintln!("pkid: configuration: {error}");
-            HashMap::new()
-        }
-    };
-    State {
+    let state = Arc::new(Mutex::new(State {
         store,
-        loaded,
-        keys,
-    }
+        loaded: Err("not loaded yet".into()),
+        keys: HashMap::new(),
+        source: None,
+    }));
+    refresh(&state, providers);
+    state
 }
 
-/// Re-reads the configuration and replaces it in `state`, whether or not it
-/// is valid: an invalid configuration stops issuing rather than leaving the
-/// last valid one in force.
-pub fn reload(state: &Mutex<State>, providers: &KeyProviders) {
-    let loaded = read_configuration();
-    events::configuration_loaded(loaded.as_ref().err().map(String::as_str));
+/// Re-reads the configuration and, if it changed, replaces it in `state`,
+/// whether or not it is valid: an invalid configuration stops issuing
+/// rather than leaving the last valid one in force. Each configuration
+/// pkid takes up is recorded as an event, once.
+pub fn refresh(state: &Mutex<State>, providers: &KeyProviders) {
+    let source = read_source();
     let Ok(mut state) = state.lock() else {
         return;
     };
+    if state.source.as_ref() == Some(&source) {
+        return;
+    }
+    let loaded = interpret(&source);
+    events::configuration_loaded(loaded.as_ref().err().map(String::as_str));
     let previous_keys = std::mem::take(&mut state.keys);
     state.keys = match &loaded {
         Ok(loaded) => open_keys(loaded, state.loaded.as_ref().ok(), previous_keys, providers),
@@ -132,10 +135,12 @@ pub fn reload(state: &Mutex<State>, providers: &KeyProviders) {
         }
     };
     state.loaded = loaded;
+    state.source = Some(source);
 }
 
-/// Keeps `state`'s configuration current: on every change to the subtree,
-/// and every [`REVALIDATE`] regardless.
+/// Keeps `state`'s configuration current, on every change to the subtree.
+/// While the subtree can't be watched, such as before it exists, pkid
+/// re-reads it every [`REVALIDATE`] instead.
 pub fn watch(state: Arc<Mutex<State>>) {
     let providers = providers();
     loop {
@@ -145,7 +150,7 @@ pub fn watch(state: Arc<Mutex<State>>) {
                     eprintln!("pkid: watching the configuration: {error}");
                     break;
                 }
-                reload(&state, &providers);
+                refresh(&state, &providers);
             },
             Err(error) => {
                 eprintln!(
@@ -154,7 +159,7 @@ pub fn watch(state: Arc<Mutex<State>>) {
             }
         }
         std::thread::sleep(REVALIDATE);
-        reload(&state, &providers);
+        refresh(&state, &providers);
     }
 }
 

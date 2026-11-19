@@ -172,7 +172,16 @@ impl AccessChecker for Recorded {
         self_sid: Option<&Sid>,
     ) -> Result<u32, PolicyError> {
         let sd = descriptor(security)?;
-        let principal_self = self_sid.map(native_sid).transpose()?;
+        // A supplied subject has no implicit PRINCIPAL SELF: without one the
+        // check reports it missing rather than matching nobody, as a token
+        // check does. The Null SID, which no subject holds, keeps the two
+        // alike.
+        let principal_self = match self_sid {
+            Some(sid) => native_sid(sid)?,
+            None => "S-1-0-0"
+                .parse()
+                .map_err(|_| PolicyError::AccessCheck("the Null SID doesn't parse".into()))?,
+        };
         let groups: Vec<SubjectGroup<'_>> = self
             .groups
             .iter()
@@ -187,9 +196,7 @@ impl AccessChecker for Recorded {
             ..SuppliedSubject::default()
         };
         let mut check = AccessCheck::new(&sd, AccessMask::MAXIMUM_ALLOWED, mapping());
-        if let Some(sid) = &principal_self {
-            check.self_sid(sid.as_ref());
-        }
+        check.self_sid(principal_self.as_ref());
         match check.check_subject(&subject).map_err(check_failed)? {
             SubjectAccessDecision::Granted { granted }
             | SubjectAccessDecision::Denied { granted } => Ok(granted.bits() & desired),

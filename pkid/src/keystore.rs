@@ -32,11 +32,16 @@ impl ServiceKeyFiles {
     fn path(&self, name: &str) -> PathBuf {
         self.directory.join(format!("{name}.key"))
     }
+
+    /// The descriptor each key file is created with.
+    pub fn file_descriptor(&self) -> String {
+        format!("D:P(A;;FA;;;{})", self.service_sid)
+    }
 }
 
 impl KeyStore for ServiceKeyFiles {
     fn create(&self, name: &str, contents: &[u8]) -> io::Result<()> {
-        let descriptor = sddl::parse(&format!("D:P(A;;FA;;;{})", self.service_sid))?;
+        let descriptor = sddl::parse(&self.file_descriptor())?;
         let path = self.path(name);
         let (file, _) = OpenOptions::new()
             .desired_access(FileAccess::WRITE_DATA)

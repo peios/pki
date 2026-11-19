@@ -2,7 +2,7 @@
 //! takes its configuration from the Registry and no arguments.
 
 use std::process::ExitCode;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 use pkid::{server, service};
 
@@ -50,7 +50,7 @@ fn main() -> ExitCode {
         return ExitCode::FAILURE;
     }
     let providers = service::providers();
-    let state = Arc::new(Mutex::new(service::start(&providers)));
+    let state = service::start(&providers);
     let listener = match server::listen() {
         Ok(listener) => listener,
         Err(error) => {
