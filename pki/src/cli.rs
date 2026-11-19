@@ -8,6 +8,12 @@ use clap::{Args, CommandFactory, Parser, Subcommand};
 /// The help layout, after the description.
 const TEMPLATE: &str = "{about}\n\n{usage-heading} {usage}\n\n{all-args}\n\nSee pki(8).";
 
+/// A root's default key: RSA, which every relying party can verify for as
+/// long as a root lasts (PEI-1701, decision 6).
+pub const ROOT_ALGORITHM: &str = "rsa-4096";
+/// Any other CA's default key.
+pub const SUBORDINATE_ALGORITHM: &str = "ecdsa-p384";
+
 /// The default lifetime of a root CA, in days.
 pub const ROOT_LIFETIME_DAYS: u32 = 3650;
 /// The default lifetime of any other CA certificate, in days.
@@ -525,16 +531,15 @@ pub struct Create {
     pub issuer: Issuer,
     #[command(flatten)]
     pub keeping: Keeping,
-    /// Choose the key algorithm (default: ecdsa-p384)
+    /// Choose the key algorithm (default: rsa-4096 for a root, ecdsa-p384
+    /// otherwise)
     #[arg(
         long,
         value_name = "algorithm",
-        default_value = "ecdsa-p384",
-        hide_default_value = true,
         value_parser = ["ecdsa-p256", "ecdsa-p384", "rsa-2048", "rsa-3072", "rsa-4096"],
         hide_possible_values = true,
     )]
-    pub algorithm: String,
+    pub algorithm: Option<String>,
     /// Set its lifetime in days (default: 3650 for a root, 1825 otherwise)
     #[arg(long, value_name = "days")]
     pub lifetime: Option<u32>,

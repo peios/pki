@@ -431,7 +431,7 @@ fn a_root_with_a_service_key() {
         KeySpec {
             provider: "service".into(),
             locator: None,
-            algorithm: Some("ecdsa-p384".into()),
+            algorithm: Some("rsa-4096".into()),
             exportable: false,
             passphrase: None,
         }
@@ -496,11 +496,13 @@ fn passphrase_files_replace_prompts() {
     let Request::CreateAuthority {
         issuer,
         lifetime_days,
+        key,
         ..
     } = host.sent()
     else {
         panic!()
     };
+    assert_eq!(key.algorithm.as_deref(), Some("ecdsa-p384"));
     let Issuer::Authority { ca, passphrase } = issuer else {
         panic!()
     };
