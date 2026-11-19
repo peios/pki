@@ -1044,6 +1044,9 @@ fn a_names_descriptor_keeps_what_it_inherits() {
     assert_eq!(*path, "Machine\\Software\\Pki\\Names\\Dns\\home\\lab");
     let written =
         peios::security::sddl::format(values.binary("RequestSecurity").unwrap().unwrap()).unwrap();
+    // An owner and group, as every shipped descriptor has, though none was
+    // given.
+    assert!(written.starts_with("O:SYG:SY"), "{written}");
     // Its own entry, and the root's, which a bare value would have dropped.
     assert!(written.contains(";AU)"), "{written}");
     assert!(

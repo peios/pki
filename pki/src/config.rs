@@ -50,10 +50,27 @@ fn sddl_text(bytes: &[u8]) -> String {
     sddl::format(bytes).unwrap_or_else(|_| "(not a valid descriptor)".to_string())
 }
 
+/// The descriptor `text` gives, with SYSTEM as its owner and group where it
+/// names none, as every descriptor pki and pkid write has them.
 fn parse_sddl(text: &str) -> Result<Vec<u8>, Failure> {
-    sddl::parse(text)
+    let invalid = |error: peios::Error| {
+        Failure::usage(format!("'{text}' is not a valid descriptor: {error}"))
+    };
+    let parsed = sddl::parse(text).map_err(invalid)?;
+    let view = peios::security::SdView::parse(parsed.as_bytes()).map_err(invalid)?;
+    if view.owner().is_some() && view.group().is_some() {
+        return Ok(parsed.as_bytes().to_vec());
+    }
+    let owner = view.owner().map_or("SY".to_string(), |sid| sid.to_string());
+    let group = view.group().map_or("SY".to_string(), |sid| sid.to_string());
+    let canonical = sddl::format(parsed.as_bytes()).map_err(invalid)?;
+    let lists = canonical
+        .find("D:")
+        .or_else(|| canonical.find("S:"))
+        .map_or("", |at| &canonical[at..]);
+    sddl::parse(&format!("O:{owner}G:{group}{lists}"))
         .map(|sd| sd.as_bytes().to_vec())
-        .map_err(|error| Failure::usage(format!("'{text}' is not a valid descriptor: {error}")))
+        .map_err(invalid)
 }
 
 // Templates.

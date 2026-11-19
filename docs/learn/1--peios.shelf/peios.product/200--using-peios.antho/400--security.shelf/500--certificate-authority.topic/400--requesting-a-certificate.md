@@ -53,8 +53,8 @@ pki enroll "Home Issuing" Device --upn alice@home --out alice.p12
 `pki` asks for a passphrase of at least 15 characters, which protects the
 file and is asked for again when it is imported. pkid sees only the request,
 never the key. The file holds the key, the certificate, and the CA
-certificates above it, so a device that imports it can present the whole
-chain.
+certificates above it that you can see on this pkid, so a device that
+imports it can present the chain.
 
 Name the certificate with `--dns` for a host name, `--email` for an email
 address, or `--upn` for a user principal name, which EAP-TLS sign-in to
