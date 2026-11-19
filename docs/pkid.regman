@@ -1,0 +1,224 @@
+--- machine\software\pki
+canonical: Machine\Software\Pki
+
+Configuration of the pkid certificate authority service.
+
+Administrators own these keys. pkid needs read and subtree-notify access and
+has no configuration-write authority. Write access to any key here is
+equivalent to administering the CA: it decides which certificates are issued
+and to whom. Grant it only to principals you would trust to issue any
+certificate. Every change is recorded as an event.
+
+Each key's own security descriptor controls who may change it. Request and
+enrolment rights are separate descriptors stored as values, so editing a
+policy and being granted by it are never the same right.
+
+--- machine\software\pki\settings
+canonical: Machine\Software\Pki\Settings
+
+Settings that apply to every CA on the machine.
+
+--- machine\software\pki\settings sidsecurityextension
+canonical: Machine\Software\Pki\Settings SidSecurityExtension
+type: REG_DWORD
+default: 1
+valid: 0 or 1
+applies: new certificates
+
+Whether certificates carry Microsoft's SID security extension
+(1.3.6.1.4.1.311.25.2), which binds a certificate to the principal that owns
+its names.
+
+Keep this set to 1. The extension lets services that accept certificates for
+sign-in match the certificate to an account by SID rather than by name, which
+is what prevents certificates with look-alike names from signing in as
+someone else. Turning it off removes that protection from every certificate
+issued afterwards, and certificates already issued keep whatever they have.
+The pki command and window do not offer this setting.
+
+A certificate whose names have no single owner never carries the extension.
+
+--- machine\software\pki\templates
+canonical: Machine\Software\Pki\Templates
+
+Certificate templates, one subkey per template, named by a GUID that never
+changes. Renaming a template changes its Name value, not its key.
+
+A template fixes everything about a certificate except its names and key.
+Requesters can't override any of it.
+
+--- machine\software\pki\templates\<guid> name
+canonical: Machine\Software\Pki\Templates\<guid> Name
+type: REG_SZ
+default: (required)
+valid: non-empty text
+applies: new requests
+
+The template's display name, such as Server or Device.
+
+--- machine\software\pki\templates\<guid> purposes
+canonical: Machine\Software\Pki\Templates\<guid> Purposes
+type: REG_MULTI_SZ
+default: (required)
+valid: one or more of server-auth, client-auth, code-signing, email-protection, time-stamping, ocsp-signing, or a dotted object identifier
+applies: new requests
+
+The extended key usages every certificate from this template carries.
+
+At least one is required. The Any Purpose usage (2.5.29.37.0) is refused.
+Templates never issue CA certificates: those are made only by the explicit
+subordinate-CA operation, which requires Manage CA.
+
+--- machine\software\pki\templates\<guid> keyusages
+canonical: Machine\Software\Pki\Templates\<guid> KeyUsages
+type: REG_MULTI_SZ
+default: (required)
+valid: one or more of digital-signature, content-commitment, key-encipherment, data-encipherment, key-agreement
+applies: new requests
+
+The key usages every certificate from this template carries. Certificate and
+CRL signing can't be listed.
+
+--- machine\software\pki\templates\<guid> lifetimedays
+canonical: Machine\Software\Pki\Templates\<guid> LifetimeDays
+type: REG_DWORD
+default: (required)
+valid: 1–7305
+applies: new certificates
+
+How long certificates from this template are valid. A certificate never
+outlives its issuing CA, so a CA close to expiry issues shorter certificates.
+
+--- machine\software\pki\templates\<guid> renewalwindowdays
+canonical: Machine\Software\Pki\Templates\<guid> RenewalWindowDays
+type: REG_DWORD
+default: 0
+valid: less than LifetimeDays
+applies: new certificates
+
+How many days before expiry renewal becomes due.
+
+--- machine\software\pki\templates\<guid> keyalgorithms
+canonical: Machine\Software\Pki\Templates\<guid> KeyAlgorithms
+type: REG_MULTI_SZ
+default: (required)
+valid: one or more of ecdsa-p256, ecdsa-p384, rsa-N with N from 2048 to 16384
+applies: new requests
+
+The keys a request may contain. rsa-N accepts RSA keys of at least N bits.
+
+--- machine\software\pki\templates\<guid> nametypes
+canonical: Machine\Software\Pki\Templates\<guid> NameTypes
+type: REG_MULTI_SZ
+default: (required)
+valid: one or more of dns, email, upn
+applies: new requests
+
+The kinds of name certificates from this template may carry. A request
+naming anything else is refused. IP addresses are not covered by name policy
+and are always refused.
+
+--- machine\software\pki\templates\<guid> commonname
+canonical: Machine\Software\Pki\Templates\<guid> CommonName
+type: REG_SZ
+default: first-name
+valid: none, first-name, owner-display-name
+applies: new certificates
+
+Where the certificate's common name comes from: nowhere, the first approved
+name, or the display name of the principal that owns every requested name.
+The display name comes from identity data, never from the request. A
+request whose names have no single owner can't use owner-display-name.
+
+--- machine\software\pki\templates\<guid> issuance
+canonical: Machine\Software\Pki\Templates\<guid> Issuance
+type: REG_SZ
+default: immediate
+valid: immediate, approval
+applies: new requests
+
+Whether permitted requests are issued at once or always held for an
+officer's approval.
+
+--- machine\software\pki\templates\<guid> enrollsecurity
+canonical: Machine\Software\Pki\Templates\<guid> EnrollSecurity
+type: REG_BINARY
+default: (required)
+valid: a self-relative security descriptor
+applies: new requests
+
+Who may use this template. Enrol (0x1) permits requests; Auto-enrol (0x2) is
+reserved for automatic enrolment.
+
+Enrolment alone grants nothing: every requested name must also be permitted
+by its RequestSecurity. The shipped templates let any authenticated
+principal enrol, O:SYG:SYD:(A;;0x1;;;AU)(A;;0x3;;;BA)(A;;0x3;;;SY).
+
+--- machine\software\pki\names
+canonical: Machine\Software\Pki\Names
+
+Who may request certificates for which names. Dns holds host names;
+Principals holds user@domain names, for email and UPN certificates.
+
+Names are matched case-insensitively and keyed in lowercase. A name's key
+lists its labels from the right: radius.lab.home is Dns\home\lab\radius. A
+principal name's key lists its domain's labels from the right, then the user
+after an @: jack@home is Principals\home\@jack.
+
+A name without its own key, or whose key has no RequestSecurity, receives
+the descriptor of the nearest key above it, by ordinary inheritance: only
+entries marked to inherit (CI) pass down, at each level. A wildcard name,
+*.lab.home, is checked on lab.home and needs Wildcard as well as one of the
+request rights. Wildcards are never granted through PRINCIPAL SELF.
+
+--- machine\software\pki\names\dns
+canonical: Machine\Software\Pki\Names\Dns
+
+The root of the host-name tree. Its RequestSecurity is required, so every
+host name has a descriptor.
+
+--- machine\software\pki\names\principals
+canonical: Machine\Software\Pki\Names\Principals
+
+The root of the principal-name tree. Its RequestSecurity is required, so
+every user@domain name has a descriptor.
+
+--- machine\software\pki\names\<tree>\<name> requestsecurity
+canonical: Machine\Software\Pki\Names\<tree>\<name> RequestSecurity
+type: REG_BINARY
+default: inherited from the nearest key above
+valid: a self-relative security descriptor; required on Dns and Principals
+applies: new requests
+
+Who may request certificates for this name and, through inheritable
+entries, the names below it. Request (0x1) permits issuing without
+approval. Request with approval (0x2) holds the request for an officer.
+Wildcard (0x4) also permits *. this name.
+
+PRINCIPAL SELF (PS) matches the name's Owner, so a grant to PS lets each
+owner request its own name. Both roots ship with
+O:SYG:SYD:(A;CI;0x1;;;PS)(A;CI;0x7;;;BA)(A;CI;0x7;;;SY): owners may request
+their own names, Administrators and SYSTEM may request any name, and nobody
+else may request anything.
+
+An explicit value replaces what this name would otherwise inherit; it is
+not merged with the descriptors above it. The pki tools include the
+inherited entries when they write one. A direct edit must do the same, or
+the entries above, such as the grants to Administrators, no longer apply
+to this name and the names below it.
+
+Granting Request to a broad group, such as Authenticated Users, lets every
+member obtain certificates for those names without approval. Prefer
+Request with approval for groups.
+
+--- machine\software\pki\names\<tree>\<name> owner
+canonical: Machine\Software\Pki\Names\<tree>\<name> Owner
+type: REG_SZ
+default: none
+valid: a SID in string form
+applies: new requests
+
+The principal that owns exactly this name. It is what PRINCIPAL SELF
+matches, and certificates for names it owns carry its SID. Ownership doesn't
+extend to names below this one. A group may own a name, which makes every
+member its owner; never make a broad group, such as Users, an owner.

@@ -95,6 +95,11 @@ impl Mailbox {
         })
     }
 
+    /// The part before the `@`.
+    pub fn local(&self) -> &str {
+        &self.local
+    }
+
     pub fn domain(&self) -> &DnsName {
         &self.domain
     }
@@ -118,6 +123,14 @@ impl UserPrincipalName {
 
     pub fn as_str(&self) -> &str {
         &self.0
+    }
+
+    /// The parts before and after the last `@`: the user and the UPN suffix.
+    pub fn parts(&self) -> (&str, &str) {
+        // `new` guarantees the separator and non-empty parts.
+        self.0
+            .rsplit_once('@')
+            .expect("validated user principal name")
     }
 }
 
