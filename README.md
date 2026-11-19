@@ -11,8 +11,8 @@ certificates and CRLs from approved profiles. `pki-policy` decides whether a
 request is issued, from certificate templates and the name trees, and builds
 its profile. `pki-keys` stores CA keys through pluggable providers: key files
 sealed under a passphrase, and online keys protected by access control. None
-of them has Registry, token or operating-system dependencies; pkid supplies
-configuration, access checks and the access-controlled key store. The
+of them depends on the Registry, tokens or other Peios services; pkid
+supplies configuration, access checks and the access-controlled key store. The
 Registry configuration is described in [pkid.regman](docs/pkid.regman).
 
 Keys, signing and randomness go through `peios-crypto`, from peios-rs.
