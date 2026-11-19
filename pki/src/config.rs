@@ -664,7 +664,11 @@ pub fn name(host: &dyn Host, command: NameCommand) -> Result<Output, Failure> {
             );
             host.put(&name.key(), &set, &[])
                 .map_err(|error| written(error, &what))?;
-            for warning in security::broad_grants(folded.as_bytes()).unwrap_or_default() {
+            let mut warnings = security::broad_grants(folded.as_bytes()).unwrap_or_default();
+            if name.is_root() {
+                warnings.extend(security::lost_root_grants(folded.as_bytes()).unwrap_or_default());
+            }
+            for warning in warnings {
                 host.warn(&warning);
             }
             let changed = after(&snapshot, &name, Some(values));

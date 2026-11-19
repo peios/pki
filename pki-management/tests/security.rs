@@ -1,7 +1,7 @@
 //! The name trees' descriptors, as pkid resolves them.
 
 use peios::security::sddl;
-use pki_management::security::{broad_grants, broad_owner, effective, fold};
+use pki_management::security::{broad_grants, broad_owner, effective, fold, lost_root_grants};
 use pki_policy::{RegData, SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL};
 
 fn blob(text: &str) -> SecurityBlob {
@@ -68,4 +68,18 @@ fn broad_owners_are_named() {
     assert!(broad_owner("S-1-5-11").is_some());
     assert!(broad_owner("S-1-5-21-1-2-3-513").is_some());
     assert!(broad_owner("S-1-5-21-1-2-3-1001").is_none());
+}
+
+#[test]
+fn a_root_that_drops_the_shipped_grants_is_warned_of() {
+    assert!(lost_root_grants(blob(DEFAULT_NAME_ROOT_SDDL).as_bytes())
+        .unwrap()
+        .is_empty());
+    let groups_only = blob("O:SYG:SYD:(A;CI;0x2;;;AU)");
+    assert_eq!(lost_root_grants(groups_only.as_bytes()).unwrap().len(), 2);
+    // Granted to the root alone, not inherited by the names below it.
+    let not_inherited = blob("O:SYG:SYD:(A;;0x7;;;BA)(A;CI;0x1;;;PS)");
+    let warnings = lost_root_grants(not_inherited.as_bytes()).unwrap();
+    assert_eq!(warnings.len(), 1);
+    assert!(warnings[0].starts_with("Administrators"), "{warnings:?}");
 }

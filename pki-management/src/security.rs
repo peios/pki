@@ -3,7 +3,7 @@
 //! deserve a warning (PEI-1709, R1).
 
 use peios::security::{sddl, AceFlags, AceType, SdBuilder, SdView, Sid, WellKnown};
-use pki_policy::{SecurityBlob, Values, NAME_REQUEST};
+use pki_policy::{SecurityBlob, Values, NAME_REQUEST, NAME_REQUEST_WITH_APPROVAL};
 
 /// What a name below a node with `parent` receives by inheritance: only
 /// the entries marked to inherit (CI) pass down, as pkid applies them.
@@ -106,6 +106,37 @@ pub fn broad_grants(security: &[u8]) -> peios::Result<Vec<String>> {
                 ));
             }
         }
+    }
+    Ok(warnings)
+}
+
+/// What a tree root's new descriptor takes away that the shipped one
+/// grants: Administrators' right to request any name in the tree, and
+/// owners' right, through PRINCIPAL SELF, to request their own. A root
+/// inherits nothing, so its descriptor replaces these rather than adding
+/// to them.
+pub fn lost_root_grants(security: &[u8]) -> peios::Result<Vec<String>> {
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    const ADMINISTRATORS: &str = "S-1-5-32-544";
+    const PRINCIPAL_SELF: &str = "S-1-5-10";
+    let view = SdView::parse(security)?;
+    let granted = |who: &str| {
+        view.dacl().is_some_and(|dacl| {
+            dacl.iter().any(|ace| {
+                ace.ace_type() == AceType::AccessAllowed
+                    && ace.flags().contains(AceFlags::CONTAINER_INHERIT)
+                    && !ace.flags().contains(AceFlags::NO_PROPAGATE_INHERIT)
+                    && ace.mask() & (NAME_REQUEST | NAME_REQUEST_WITH_APPROVAL | GENERIC_ALL) != 0
+                    && ace.sid().is_some_and(|sid| sid.to_string() == who)
+            })
+        })
+    };
+    let mut warnings = Vec::new();
+    if !granted(ADMINISTRATORS) {
+        warnings.push("Administrators can't request certificates for names in this tree under this descriptor".to_string());
+    }
+    if !granted(PRINCIPAL_SELF) {
+        warnings.push("owners can't request certificates for their own names in this tree under this descriptor".to_string());
     }
     Ok(warnings)
 }

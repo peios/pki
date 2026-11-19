@@ -1083,6 +1083,23 @@ fn broad_grants_and_owners_are_warned_of() {
 }
 
 #[test]
+fn a_root_descriptor_that_drops_administrators_is_warned_of() {
+    let host = fake();
+    running(&host, "name set-security . D:(A;CI;0x2;;;AU)").unwrap();
+    let warnings = host.warnings.borrow().clone();
+    assert_eq!(warnings.len(), 2, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with("Administrators can't request"),
+        "{warnings:?}"
+    );
+    // Below the root, the root's grants are kept, so there is nothing to
+    // warn of.
+    let host = fake();
+    running(&host, "name set-security lab.home D:(A;CI;0x2;;;AU)").unwrap();
+    assert!(host.warnings.borrow().is_empty());
+}
+
+#[test]
 fn names_are_removed_leaf_first_and_roots_never() {
     let host = fake();
     let failure = running(&host, "name remove home").unwrap_err();

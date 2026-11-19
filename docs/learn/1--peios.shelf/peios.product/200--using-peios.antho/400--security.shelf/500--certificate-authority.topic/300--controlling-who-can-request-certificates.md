@@ -54,6 +54,11 @@ now wait for an officer of the CA. `pki` adds the entries `lab.home`
 inherits from above, so Administrators and owners keep the rights the root
 gave them.
 
+A tree's root, `.` or `@`, inherits nothing, so its descriptor replaces the
+shipped one whole. `pki` warns if a new root descriptor leaves Administrators
+unable to request the names in the tree, or owners unable to request their
+own.
+
 Prefer Request with approval for groups. Request (0x1) issues without
 anyone looking, so granting it to a broad group lets every member obtain
 certificates for those names; `pki` warns when you grant it. Wildcard (0x4)
