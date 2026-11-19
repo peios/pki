@@ -1,0 +1,1012 @@
+.TH PKI 8 2026-11-19 "Peios pki 0.1.0"
+.SH NAME
+pki \- manage the Peios certificate authority
+.SH SYNOPSIS
+.B pki setup
+.br
+.B pki ca list
+.br
+.B pki ca show
+.I ca
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki ca create
+.I name
+.BR \-\-root " | " \-\-issuer
+.IR ca " | "
+.B \-\-offline
+.I request-file
+.RI [ options ]
+.br
+.B pki ca sign
+.I ca request-file
+.B \-\-name
+.I name
+.RI [ options ]
+.br
+.B pki ca install
+.I ca certificate-file
+.br
+.B pki ca import
+.I name certificate-file sealed-key-file
+.RI [ options ]
+.br
+.B pki ca export\-key
+.I ca file
+.RI [ options ]
+.br
+.B pki ca set
+.I ca
+.RI [ options ]
+.br
+.B pki request submit
+.I ca template request-file
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki request list
+.I ca
+.RB [ \-\-status
+.IR status ]
+.br
+.B pki request show
+.I ca request
+.br
+.B pki request approve
+.I ca request
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki request deny
+.I ca request
+.RB [ \-\-reason
+.IR text ]
+.br
+.B pki cert list
+.I ca
+.RB [ \-\-unrevoked ]
+.br
+.B pki cert show
+.I ca serial
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki cert get
+.I ca request
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki cert revoke
+.I ca serial
+.RB [ \-\-reason
+.IR reason ]
+.br
+.B pki enroll
+.I ca template
+.B \-\-out
+.I file
+.RB [ \-\-dns
+.IR name ]
+.RB [ \-\-email
+.IR address ]
+.RB [ \-\-upn
+.IR name ]
+.RI [ options ]
+.br
+.B pki enroll
+.I ca
+.B \-\-request
+.I request
+.B \-\-key
+.I file
+.B \-\-out
+.I file
+.br
+.B pki template list
+.br
+.B pki template show
+.I template
+.br
+.B pki template create
+.I name
+.RB [ \-\-from
+.IR template ]
+.RI [ template-options ]
+.br
+.B pki template set
+.I template
+.RB [ \-\-name
+.IR name ]
+.RI [ template-options ]
+.br
+.B pki template delete
+.I template
+.br
+.B pki name list
+.br
+.B pki name show
+.I name
+.br
+.B pki name add
+.I name
+.RB [ \-\-owner
+.IR sid ]
+.br
+.B pki name remove
+.I name
+.br
+.B pki name set\-security
+.I name sddl
+|
+.B \-\-inherit
+.br
+.B pki name set\-owner
+.I name sid
+|
+.B \-\-none
+.br
+.B pki help
+.RI [ command ]
+.SH DESCRIPTION
+.B pki
+manages the certificate authorities that
+.BR pkid (8)
+runs on this machine.
+It asks
+.B pkid
+to create, sign and change CAs, and
+.B pkid
+decides whether you can, by your own access token: what
+.B pki
+can do is exactly what you can.
+.PP
+A CA's key stays with
+.BR pkid .
+In
+.BR pkid 's
+own store it is readable by
+.B pkid
+alone, which signs with it unattended.
+A key kept in a sealed file instead, such as a root's on removable media, is sealed under a passphrase and never kept open:
+.B pki
+asks for the passphrase each time the key signs.
+.PP
+Name a CA by its ID or by its name.
+Names compare without regard to case; when two CAs share a name, use the ID.
+Name a template the same way, by its GUID or its name.
+.PP
+Templates and names are not
+.BR pkid 's
+to change but an administrator's:
+.B pki
+writes them to the Registry under
+.BR Machine\eSoftware\ePki ,
+and
+.B pkid
+takes each change up as soon as it is written.
+.B pki
+checks a change by the rules
+.B pkid
+loads it with before writing it, since
+.B pkid
+issues nothing while any of its configuration is invalid.
+.PP
+.B pki
+reads certificates and requests in PEM or DER, and writes them in PEM.
+It never overwrites a file: an output file must not exist already.
+.SH COMMANDS
+.TP
+.B setup
+Prepare this machine for
+.BR pkid :
+create its state directories under
+.IR /var/state/pki ,
+and seed its configuration in the Registry under
+.BR Machine\eSoftware\ePki :
+the Server and Device templates if there are no templates, the roots of the name trees, and the key where
+.B pkid
+records the CAs created through it.
+.B setup
+only adds what is missing.
+It never replaces a value an administrator has set, so it is safe to run again.
+Only an administrator can run it.
+.TP
+.B ca list
+List the CAs: name, ID, and whether each issues or awaits its certificate.
+.TP
+.BI "ca show " ca
+Show a CA in full: its key, the templates it issues from, and its certificate's subject, issuer, serial number, validity and SHA-256 fingerprint.
+With
+.BI \-\-out " file" ,
+also write its certificate to
+.IR file ,
+such as to give to the machines that are to trust it; a CA awaiting its certificate writes the request instead.
+.TP
+.BI "ca create " name
+Create a CA with a new key.
+Give one of:
+.RS
+.TP
+.B \-\-root
+A root CA, which signs its own certificate.
+.TP
+.BI \-\-issuer " ca"
+A subordinate of another CA on this
+.BR pkid ,
+which signs its certificate now.
+.TP
+.BI \-\-offline " request-file"
+A subordinate of a CA elsewhere.
+.B pki
+writes the request for that CA to sign to
+.IR request-file ;
+the new CA issues nothing until its certificate is installed with
+.BR "ca install" .
+.RE
+.TP
+.BI "ca sign " "ca request-file"
+Sign another CA's request with
+.IR ca 's
+key, making it a subordinate of
+.IR ca ,
+for a CA that runs elsewhere.
+.B \-\-name
+names the subordinate CA.
+The certificate goes to standard output, or to the file
+.B \-\-out
+names.
+.TP
+.BI "ca install " "ca certificate-file"
+Install the certificate a CA created with
+.B \-\-offline
+awaits.
+Its key must be the CA's own.
+.TP
+.BI "ca import " "name certificate-file sealed-key-file"
+Take up an existing CA, such as one restored from a backup, from its certificate and its key as
+.B ca export\-key
+wrote it.
+.B pki
+asks for the passphrase the key file is sealed under.
+.TP
+.BI "ca export\-key " "ca file"
+Write
+.IR ca 's
+key to
+.IR file ,
+sealed under a new passphrase, such as for a backup.
+A key in
+.BR pkid 's
+store can be exported only if it was created or imported with
+.BR \-\-exportable .
+The file is readable by its owner alone.
+.TP
+.BI "ca set " ca
+Change which templates
+.I ca
+issues from, or the CRL distribution points its certificates name.
+Each list given replaces the current one; a list not given stays as it is.
+.TP
+.BI "request submit " "ca template request-file"
+Ask
+.I ca
+for a certificate, under one of the templates it offers.
+.I ca
+issues it at once, holds it for an officer to approve, or refuses it, as its template and the name trees decide.
+An issued certificate goes to standard output, or to the file
+.B \-\-out
+names.
+A held request's number is printed, to collect the certificate by once it is approved.
+.TP
+.BI "request list " ca
+List
+.IR ca 's
+requests, oldest first: number, status, template, when it was submitted, and the names it asked for.
+.BI \-\-status " status"
+lists only those that are
+.BR pending ,
+.B issued
+or
+.BR denied .
+.TP
+.BI "request show " "ca request"
+Show a request in full, including who submitted it, who decided it and why it was held or refused.
+.TP
+.BI "request approve " "ca request"
+Approve a held request, issuing its certificate.
+Only an officer of the CA can, and never for a request they submitted themselves.
+.TP
+.BI "request deny " "ca request"
+Refuse a held request.
+.BI \-\-reason " text"
+records why.
+.TP
+.BI "cert list " ca
+List the certificates
+.I ca
+has issued, in order of their requests: serial number, request, whether each is valid, expired or revoked, when it expires, and its subject.
+.B \-\-unrevoked
+leaves out revoked certificates.
+.TP
+.BI "cert show " "ca serial"
+Show a certificate, with its revocation if it has one.
+.B \-\-out
+also writes it to a file.
+.TP
+.BI "cert get " "ca request"
+Fetch the certificate issued for a request, such as one an officer has since approved, to standard output or the file
+.B \-\-out
+names.
+.TP
+.BI "cert revoke " "ca serial"
+Revoke a certificate.
+.BI \-\-reason " reason"
+gives the reason, as RFC 5280 names it:
+.BR unspecified ,
+the default,
+.BR key\-compromise ,
+.BR ca\-compromise ,
+.BR affiliation\-changed ,
+.BR superseded ,
+.B cessation\-of\-operation
+or
+.BR privilege\-withdrawn .
+Revocation cannot be undone.
+.TP
+.BI "enroll " "ca template"
+Make a key on this machine, ask
+.I ca
+to certify it under
+.I template
+for the names given, and write the key with its certificate and the CA certificates above it that you have a right at to the PKCS #12 file
+.B \-\-out
+names, such as to import into a phone for EAP-TLS.
+Give at least one name, with
+.BR \-\-dns ,
+.B \-\-email
+or
+.BR \-\-upn ;
+each can be repeated.
+The key never reaches
+.BR pkid ,
+which sees only the request.
+.B pki
+asks for a new passphrase to protect the file.
+.IP
+If the request is held for approval,
+.B pki
+seals the key under the same passphrase in a file beside the one it would have written, named with
+.B .key
+added, and prints the command that collects the certificate once it is approved:
+.B \-\-request
+and
+.B \-\-key
+name the request and that file, and
+.B pki
+writes the PKCS #12 file then.
+.IP
+.BI \-\-algorithm " algorithm"
+chooses the key, as for
+.BR "ca create" ;
+the default is
+.BR ecdsa\-p256 .
+.BI \-\-friendly\-name " text"
+labels the key in the file; the default is the first name.
+.B \-\-passphrase\-file
+gives the passphrase as a file's first line.
+.IP
+The file uses the encryption OpenSSL 3 writes by default, AES-256 with PBKDF2 and SHA-256.
+Current versions of OpenSSL, Windows and Firefox import it; Apple systems older than iOS 18 and macOS 15 are reported to refuse it.
+.TP
+.B template list
+List the templates: name, GUID, whether they issue at once or hold for approval, lifetime, and purposes.
+.TP
+.BI "template show " template
+Show a template in full, with its enrollment descriptor in SDDL and the CAs that issue from it.
+.TP
+.BI "template create " name
+Create a template.
+.BI \-\-from " template"
+starts from a copy of another; without it, give at least
+.BR \-\-purpose ,
+.B \-\-name\-type
+and
+.BR \-\-lifetime ,
+and the rest are the shipped templates' choices, except that renewal is due only at expiry unless
+.B \-\-renewal\-window
+is given.
+A new template is offered by no CA until
+.B ca set
+adds it.
+.TP
+.BI "template set " template
+Change a template.
+Options not given leave their part of it as it is.
+.TP
+.BI "template delete " template
+Delete a template.
+A template a CA still issues from cannot be deleted.
+.TP
+.B name list
+List the names that have settings of their own: their owner, and whether their descriptor is their own or inherited.
+.TP
+.BI "name show " name
+Show who can request
+.I name
+\(em its request descriptor, in SDDL, and where it comes from \(em and who owns it.
+.TP
+.BI "name add " name
+Add
+.I name
+to its tree, optionally with an owner.
+.TP
+.BI "name remove " name
+Remove
+.IR name .
+A name with names below it, and a tree's root, cannot be removed.
+.TP
+.BI "name set\-security " "name sddl"
+Set who can request
+.I name
+and, through entries marked to inherit (CI), the names below it.
+The rights are Request (0x1), which issues without approval, Request with approval (0x2), which holds the request for an officer, and Wildcard (0x4), which also permits
+.BI *. name .
+PRINCIPAL SELF (PS) matches the name's owner.
+.B pki
+adds the entries
+.I name
+inherits from above, so that grants made higher up, such as Administrators', still apply.
+.B \-\-inherit
+removes the name's own descriptor instead, so that it inherits again.
+.TP
+.BI "name set\-owner " "name sid"
+Make the principal
+.I sid
+the owner of exactly
+.IR name ;
+.B \-\-none
+leaves it without one.
+Certificates for names a principal owns carry its SID.
+.TP
+.BR help " [\fIcommand\fR]"
+Print help for
+.B pki
+or one of its commands, as
+.I command
+.B \-\-help
+does.
+.SH OPTIONS
+.TP
+.BR \-j ", " \-\-json
+Print output as JSON; see
+.BR "JSON OUTPUT" .
+.TP
+.BR \-h ", " \-\-help
+Print help.
+.TP
+.BR \-V ", " \-\-version
+Print the version.
+.SS Creating and importing CAs
+These apply to
+.B ca create
+and
+.BR "ca import" .
+.TP
+.BI \-\-key\-file " path"
+Keep the CA's key in a file at
+.IR path ,
+sealed under a passphrase
+.B pki
+asks for, instead of in
+.BR pkid 's
+store.
+.B pkid
+writes the file, so
+.I path
+must be one it can write.
+.TP
+.B \-\-exportable
+Let a key in
+.BR pkid 's
+store be exported with
+.BR "ca export\-key" .
+A key in the store that is not exportable can never leave
+.BR pkid .
+A key in a sealed file is already an export, and can always be exported.
+.TP
+.BI \-\-template " template"
+Issue from
+.IR template .
+Repeat for more.
+.TP
+.BI \-\-crl " url"
+Name
+.I url
+as a CRL distribution point in the certificates the CA issues.
+Repeat for more.
+.TP
+.BI \-\-algorithm " algorithm"
+For
+.BR "ca create" :
+the new key's algorithm, one of
+.BR ecdsa\-p256 ,
+.BR ecdsa\-p384 ,
+.BR rsa\-2048 ,
+.B rsa\-3072
+and
+.BR rsa\-4096 .
+The default is
+.BR ecdsa\-p384 .
+.TP
+.BI \-\-lifetime " days"
+For
+.B ca create
+and
+.BR "ca sign" :
+how long the certificate is valid.
+The default is 3650 days for a root and 1825 days for any other CA.
+.TP
+.BI \-\-path\-length " count"
+For
+.B ca create
+and
+.BR "ca sign" :
+how many CAs can sit below the new one.
+With none given there is no limit; 0 lets it issue only to people and machines.
+.SS Changing a CA
+These apply to
+.BR "ca set" .
+.TP
+.BI \-\-template " template"
+Issue from these templates only.
+Repeat for more.
+.TP
+.B \-\-no\-templates
+Issue from no templates, so that the CA takes no requests.
+.TP
+.BI \-\-crl " url"
+Name these CRL distribution points only.
+Repeat for more.
+.TP
+.B \-\-no\-crls
+Name no CRL distribution points.
+.SS Templates
+These apply to
+.B template create
+and
+.BR "template set" .
+Each list option can be repeated, and the values given replace the template's list.
+.TP
+.BI \-\-purpose " purpose"
+An extended key usage certificates carry:
+.BR server\-auth ,
+.BR client\-auth ,
+.BR code\-signing ,
+.BR email\-protection ,
+.BR time\-stamping ,
+.BR ocsp\-signing ,
+or a dotted object identifier.
+.TP
+.BI \-\-key\-usage " usage"
+A key usage certificates carry:
+.BR digital\-signature ,
+.BR content\-commitment ,
+.BR key\-encipherment ,
+.B data\-encipherment
+or
+.BR key\-agreement .
+.TP
+.BI \-\-lifetime " days"
+How long certificates last, from 1 to 7305 days.
+.TP
+.BI \-\-renewal\-window " days"
+How many days before expiry renewal is due, fewer than the lifetime.
+.TP
+.BI \-\-key\-algorithm " algorithm"
+A kind of key requests can contain:
+.BR ecdsa\-p256 ,
+.BR ecdsa\-p384 ,
+or
+.BI rsa\- bits
+for RSA keys of at least
+.I bits
+bits, from 2048 to 8192.
+.TP
+.BI \-\-name\-type " type"
+A kind of name certificates can carry:
+.BR dns ,
+.B email
+or
+.BR upn .
+.TP
+.BI \-\-common\-name " source"
+Where the common name comes from:
+.BR none ,
+.BR first\-name ,
+the default, or
+.BR owner\-display\-name .
+.TP
+.BI \-\-issuance " issuance"
+.BR immediate ,
+the default, issues what policy permits at once;
+.B approval
+holds every request for an officer.
+.TP
+.BI \-\-enroll\-security " sddl"
+Who can use the template: Enroll (0x1) lets a principal submit requests under it.
+Enrollment alone grants nothing; every name requested must also be permitted.
+.SH NAMES
+A name is a host name, such as
+.BR radius.lab.home ,
+or a principal name,
+.IR user @ domain ,
+such as
+.BR jack@home ,
+as email and UPN certificates carry.
+.BI @ domain
+names every principal at
+.IR domain ,
+whose descriptor they inherit.
+.B .
+and
+.B @
+name the roots of the two trees.
+Names compare without regard to case.
+A wildcard name has no entry of its own: Wildcard on
+.B lab.home
+permits
+.BR *.lab.home .
+.PP
+A descriptor given in SDDL can use SID aliases, such as
+.B BA
+for Administrators and
+.B AU
+for Authenticated Users.
+.B pki
+warns when a name's own descriptor lets a broad group, such as Authenticated Users or Users, request it without approval, and when such a group is made an owner: every member could then obtain certificates for the name.
+Prefer Request with approval (0x2) for groups.
+.SH PASSPHRASES
+A key in a sealed file signs only with its passphrase, and
+.B pki
+asks for it on the terminal, without echoing it, whenever a command needs it.
+A new passphrase is asked for twice and must have at least 15 characters.
+.PP
+A script gives a passphrase in a file instead, as the file's first line.
+Each command names its files by what they unlock:
+.TP
+.B \-\-passphrase\-file
+The new key file's, for
+.BR "ca create" ;
+the CA key's, for
+.BR "ca sign" ;
+the sealed key file's, for
+.BR "ca import" ;
+the key's current one, for
+.BR "ca export\-key" ;
+the PKCS #12 file's, and a held key's, for
+.BR enroll .
+.TP
+.B \-\-issuer\-passphrase\-file
+The issuing CA key's, for
+.B ca create
+with
+.BR \-\-issuer .
+.TP
+.B \-\-new\-passphrase\-file
+The new key file's, for
+.BR "ca import" ;
+the exported file's, for
+.BR "ca export\-key" .
+.PP
+.B pki
+never takes a passphrase from its arguments or the environment, where other processes can read it.
+.SH JSON OUTPUT
+With
+.BR \-\-json ,
+each command prints one JSON object on standard output.
+A CA has
+.BR id ,
+.BR name ,
+.B state
+.RB ( issuing
+or
+.BR awaiting\-certificate ),
+.BR key ,
+.BR key_available ,
+.B templates
+(each with
+.B id
+and
+.BR name ),
+and
+.BR certificate :
+its
+.BR subject ,
+.BR issuer ,
+.BR serial ,
+.BR not_before ,
+.B not_after
+and
+.BR sha256 ,
+or null.
+.B ca list
+prints
+.BR authorities ;
+.B ca show
+prints one CA, and
+.BR "ca create" ,
+.BR "ca install" ,
+.B ca import
+and
+.B ca set
+print it under
+.BR created ,
+.BR installed ,
+.B imported
+or
+.BR changed .
+.B ca sign
+prints the
+.B certificate
+in PEM.
+.PP
+A request has
+.BR id ,
+.B status
+.RB ( pending ,
+.B issued
+or
+.BR denied ),
+.B template
+and
+.BR template_name ,
+.BR names ,
+.BR requester ,
+.BR submitted ,
+.BR reasons ,
+.B decided
+and
+.BR decider .
+.B request list
+prints
+.BR requests ,
+and
+.B request show
+prints one.
+.B request submit
+and
+.B request approve
+print the
+.BR request 's
+number and
+.BR status ,
+with the
+.B certificate
+in PEM when it was issued, or the
+.B reasons
+it is held.
+.PP
+A certificate has
+.B serial
+(in hex),
+.BR request ,
+.B status
+.RB ( valid ,
+.B expired
+or
+.BR revoked ),
+.BR subject ,
+.BR not_before ,
+.BR not_after ,
+.BR owner ,
+.B sha256
+and
+.BR revocation :
+its
+.BR revoked ,
+.B reason
+and
+.BR revoker ,
+or null.
+.B cert list
+prints
+.BR certificates ;
+.B cert show
+and
+.B cert get
+print one, with
+.B cert get
+adding the
+.B certificate
+in PEM.
+.B enroll
+prints the
+.BR request 's
+number,
+.BR status ,
+and the file
+.BR written ,
+with the certificate's
+.B subject
+and
+.BR not_after ,
+or, when held, the
+.B key_file
+the key is sealed in.
+.PP
+A template has
+.BR id ,
+.BR name ,
+.BR purposes ,
+.BR key_usages ,
+.BR lifetime_days ,
+.BR renewal_window_days ,
+.BR key_algorithms ,
+.BR name_types ,
+.BR common_name ,
+.BR issuance ,
+.B enroll_security
+(SDDL) and
+.B used_by
+(the CAs that issue from it).
+.B template list
+prints
+.BR templates ;
+.B template show
+prints one, and
+.B template create
+and
+.B template set
+print it under
+.B created
+or
+.BR changed .
+.PP
+A name has
+.BR name ,
+.B tree
+.RB ( Dns
+or
+.BR Principals ),
+.BR exists ,
+.BR owner ,
+.B security
+(SDDL) and
+.BR inherited .
+.B name list
+prints
+.BR names ;
+.B name show
+prints one, and
+.B name add
+and the
+.B name set
+commands print it under
+.B added
+or
+.BR changed .
+.PP
+Times are in RFC 3339, in UTC, and people are named by their SIDs.
+A file written is named by
+.B written
+or, for
+.BR \-\-offline ,
+.BR request_file .
+.PP
+An error is printed on standard error as
+.B error
+with a
+.B code
+.RB ( failed ,
+.BR invalid\-argument ,
+.BR permission\-denied ,
+.B not\-found
+or
+.BR already\-exists )
+and a
+.BR message .
+.SH CONFIGURATION
+.BR setup ,
+the
+.B template
+commands and the
+.B name
+commands read and write
+.B Machine\eSoftware\ePki
+directly, each change in one Registry transaction.
+The
+.B ca
+commands read it only to find templates by name.
+Each value is documented in
+.BR regman (1);
+run
+.BR "regman Machine\eSoftware\ePki" .
+.SH SECURITY
+.B pki
+grants nothing itself.
+.B pkid
+decides each
+.BR ca ,
+.BR request ,
+.B cert
+and
+.B enroll
+command by your own access token, against the CA's descriptor, the template's and the names'; see
+.BR pkid (8).
+The commands that write the Registry need write access to the keys under
+.BR Machine\eSoftware\ePki ,
+which Administrators have by default.
+Whoever can write them decides which certificates are issued and to whom.
+.SH EXIT STATUS
+.TP
+.B 0
+Success.
+.TP
+.B 1
+Failure, such as
+.B pkid
+not running, a passphrase that is wrong or too short, a certificate that does not fit its CA, or a request the CA refused.
+.TP
+.B 2
+Usage error: an unknown command or option, a missing argument, a value that is not valid, such as a template
+.B pkid
+would refuse, or a CA name more than one CA has.
+.TP
+.B 3
+Access denied: you cannot do this to the CA, change the configuration, or run
+.BR setup ,
+or the request you would approve is your own.
+.TP
+.B 4
+Not found: no CA, template, name, request or certificate is the one given, or a file does not exist.
+.TP
+.B 5
+Already exists: an output file exists, the CA already has its certificate, or a template or name of that name exists.
+.SH EXAMPLES
+.TP
+.B pki setup
+Prepare a new machine for
+.BR pkid .
+.TP
+.B pki ca create """Lab Root""" \-\-root \-\-key\-file /media/usb/root.key
+Create a root CA whose key is sealed on removable media.
+.TP
+.B pki ca create """Lab Issuing""" \-\-issuer """Lab Root""" \-\-template Server \-\-template Device
+Create a CA that issues unattended from
+.BR pkid 's
+store, signed by the root, which asks for the root key's passphrase.
+.TP
+.B pki ca show """Lab Root""" \-\-out lab\-root.pem
+Write the root's certificate, to give to the machines that are to trust it.
+.TP
+.B pki ca export\-key """Lab Issuing""" issuing.key
+Back up an exportable CA key.
+.TP
+.B pki request submit """Lab Issuing""" Server www.csr \-\-out www.pem
+Ask for a server certificate.
+.TP
+.B pki request list """Lab Issuing""" \-\-status pending
+List the requests waiting for an officer.
+.TP
+.B pki enroll """Lab Issuing""" Device \-\-upn alice@home \-\-out alice.p12
+Make a certificate for Alice's phone to sign in to Wi-Fi with, and its key, in one file.
+.TP
+.B pki template create Web \-\-from Server \-\-issuance approval
+Make a server template whose every request waits for an officer.
+.TP
+.B pki name set\-security lab.home """D:(A;CI;0x2;;;AU)"""
+Let anyone signed in ask for certificates for names under
+.BR lab.home ,
+each held for approval.
+.TP
+.B pki name set\-owner radius.lab.home S\-1\-5\-21\-1\-2\-3\-1105
+Let the RADIUS server's principal request its own name without approval, through the roots' PRINCIPAL SELF grant.
+.TP
+.B pki cert revoke """Lab Issuing""" 4f:1a:09 \-\-reason key\-compromise
+Revoke a certificate whose key was exposed.
+.SH SEE ALSO
+.BR regman (1),
+.BR pkid (8)
+.PP
+https://learn.peios.org/peios/using-peios/certificate-authority/overview

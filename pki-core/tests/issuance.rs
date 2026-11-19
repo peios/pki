@@ -2,10 +2,11 @@
 
 use peios_crypto::{KeyAlgorithm, PrivateKey, PublicKey, SignatureScheme, Signer};
 use pki_core::{
-    ca_request, ca_request_key, create_root, AltName, CaProfile, CaSubject, Certificate,
-    CertificateRequest, CommonName, CrlProfile, DisplayName, DnsName, Error, ExtendedKeyUsage,
-    ExtendedKeyUsages, IssuingCa, KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree,
-    RevocationReason, RevokedCertificate, SerialNumber, Sid, SubjectPublicKey, UsageOid, Validity,
+    ca_request, ca_request_key, create_root, leaf_request, AltName, CaProfile, CaSubject,
+    Certificate, CertificateRequest, CommonName, CrlProfile, DisplayName, DnsName, Error,
+    ExtendedKeyUsage, ExtendedKeyUsages, IssuingCa, KeyUsage, LeafProfile, LeafSubject,
+    NameConstraints, NameSubtree, RevocationReason, RevokedCertificate, SerialNumber, Sid,
+    SubjectPublicKey, UsageOid, Validity,
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use time::macros::datetime;
@@ -793,4 +794,23 @@ fn ip_and_email_name_constraints_round_trip() {
     ))
     .is_ok());
     assert!(issue(AltName::Email(pki_core::Mailbox::new("jack@home").unwrap())).is_err());
+}
+
+#[test]
+fn leaf_requests_name_only_what_they_are_given() {
+    let key = TestKey::generate(KeyAlgorithm::EcdsaP256);
+    let names = vec![
+        AltName::Dns(DnsName::new("www.lab.home").unwrap()),
+        AltName::Email(pki_core::Mailbox::new("jack@home").unwrap()),
+        AltName::Upn(pki_core::UserPrincipalName::new("jack@home").unwrap()),
+    ];
+    let request = leaf_request(&key, &names).unwrap();
+    let parsed = CertificateRequest::from_der(&request).unwrap();
+    assert_eq!(parsed.subject_key(), key.subject());
+    let mut got = parsed.names().to_vec();
+    let mut want = names.clone();
+    got.sort();
+    want.sort();
+    assert_eq!(got, want);
+    assert!(leaf_request(&key, &[]).is_err());
 }

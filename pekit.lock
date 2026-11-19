@@ -34,7 +34,7 @@
       "prefix": "github.com/peios/peios-rs",
       "git": "https://github.com/peios/peios-rs",
       "dir": "",
-      "rev": "fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
+      "rev": "b95a3b8dade9c8033898a389aa53122d6c1d4e9e"
     },
     {
       "prefix": "github.com/peios/peios-sdk",
@@ -83,8 +83,8 @@
       "path": "github.com/peios/peios-rs",
       "git": "https://github.com/peios/peios-rs",
       "dir": "",
-      "commit": "fcf9a9341dfcff28eece119dfaffcacf2b2abf62",
-      "tree": "96f3638b600514506f347d6f56a08a7e7f3319dd5d238b1828579d6df012efce"
+      "commit": "b95a3b8dade9c8033898a389aa53122d6c1d4e9e",
+      "tree": "c4b7348c86470d0f1e27a22847b816480eb8c4bd6ecef6760b3e62aaf004228f"
     },
     {
       "path": "github.com/peios/peios-sdk",

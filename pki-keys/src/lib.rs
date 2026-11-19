@@ -26,7 +26,7 @@ mod service;
 
 pub use error::KeyError;
 pub use file::KeyFileProvider;
-pub use keyfile::{describe_sealed_key, open_sealed_key, KeyDescription, Protection};
+pub use keyfile::{describe_sealed_key, open_sealed_key, seal_key, KeyDescription, Protection};
 pub use passphrase::{NewPassphrase, Passphrase, MIN_PASSPHRASE_CHARS};
 pub use peios_crypto::{KeyAlgorithm, PrivateKey, PublicKey, Signer};
 pub use provider::{KeyOptions, KeyProvider, KeyProviders, OpenKey, SOFTWARE_ALGORITHMS};

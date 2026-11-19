@@ -10,7 +10,7 @@ use pki_pipeline::{Principal, DEFAULT_CA_SDDL};
 use pki_policy::{SecurityBlob, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
 use pkid::identity::Recorded;
 use pkid::keystore::ServiceKeyFiles;
-use pkid::{provision, service};
+use pkid::service;
 use pkid_core::SERVICE_SID;
 
 #[test]
@@ -22,9 +22,6 @@ fn every_descriptor_pkid_builds_parses() {
         DEFAULT_NAME_ROOT_SDDL.to_string(),
         DEFAULT_TEMPLATE_ENROLL_SDDL.to_string(),
         keys.file_descriptor(),
-        provision::state_dacl(),
-        provision::keys_dacl(),
-        provision::authorities_grant(),
     ] {
         sddl::parse(&text).unwrap_or_else(|error| panic!("{text}: {error}"));
     }

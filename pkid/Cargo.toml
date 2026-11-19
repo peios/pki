@@ -12,6 +12,7 @@ peios.workspace = true
 peios-crypto.workspace = true
 pki-core = { path = "../pki-core" }
 pki-keys = { path = "../pki-keys" }
+pki-management = { path = "../pki-management" }
 pki-pipeline = { path = "../pki-pipeline" }
 pki-policy = { path = "../pki-policy" }
 pki-store = { path = "../pki-store" }

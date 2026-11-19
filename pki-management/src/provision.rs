@@ -14,8 +14,7 @@ use pki_policy::defaults::{device_template, name_root, server_template};
 use pki_policy::{SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
 use pkid_core::SERVICE_SID;
 
-use crate::config::ROOT;
-use crate::service::{KEYS_DIR, STATE_DIR};
+use crate::{KEYS_DIR, ROOT, STATE_DIR};
 
 fn error(error: peios::Error) -> io::Error {
     error.into()
@@ -63,23 +62,6 @@ pub fn keys_dacl() -> String {
 /// pkid's own grant on `Authorities`, which the key also inherits to.
 pub fn authorities_grant() -> String {
     format!("O:SYG:SYD:(A;CI;GA;;;{SERVICE_SID})")
-}
-
-/// A new template GUID.
-fn guid() -> io::Result<String> {
-    let mut bytes = [0u8; 16];
-    peios_crypto::random::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    ))
 }
 
 fn binary_sd(sddl_text: &str) -> io::Result<SecurityBlob> {
@@ -144,7 +126,7 @@ pub fn registry() -> io::Result<Seeded> {
     if empty {
         let enroll = binary_sd(DEFAULT_TEMPLATE_ENROLL_SDDL)?;
         for values in [server_template(&enroll), device_template(&enroll)] {
-            let id = guid()?;
+            let id = crate::new_guid()?;
             let (key, _) = create(&format!("{ROOT}\\Templates\\{id}"), &transaction)?;
             write_missing(&key, &values, &transaction)?;
             seeded.templates.push(id);
