@@ -36,7 +36,7 @@ runs but cannot record anything, and opens its database at the first configurati
 .B pkid
 serves requests on a local socket, one request per connection.
 It authorizes each by the access token of the process that connected, which the kernel captures as it connects, and never acts as its caller.
-A request names a CA; what the caller may do there is decided by that CA's security descriptor, and whether a certificate is issued by the CA's templates and the name trees.
+A request names a CA; what the caller can do there is decided by that CA's security descriptor, and whether a certificate is issued by the CA's templates and the name trees.
 A request that policy permits is issued at once, held for an officer of the CA to approve, or refused.
 .PP
 A CA's key is kept in one of two places.
@@ -74,7 +74,7 @@ for the whole machine,
 .B Templates
 for the kinds of certificate its CAs issue,
 .B Names
-for who may request certificates for which names, and
+for who can request certificates for which names, and
 .B Authorities
 for the CAs themselves.
 It writes only
@@ -112,9 +112,9 @@ Creating and importing CAs needs Manage (0x8) in
 .BR "Settings ManageSecurity" ,
 held by Administrators and SYSTEM by default.
 .PP
-A request is issued only if the caller may enrol in its template, by the template's
+A request is issued only if the caller can enroll in its template, by the template's
 .BR EnrollSecurity ,
-and may request each name it asks for, by the
+and can request each name it asks for, by the
 .B RequestSecurity
 of that name or the nearest name above it.
 Approval checks the request again as its requester, as they were when they submitted it, so an officer's own rights never widen what is issued.
@@ -172,3 +172,5 @@ tells peinit it is ready once its socket is listening, even while its configurat
 .BR evman (1),
 .BR regman (1),
 .BR pki (8)
+.PP
+https://learn.peios.org/peios/using-peios/certificate-authority/overview

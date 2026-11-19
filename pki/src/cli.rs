@@ -49,7 +49,7 @@ pub enum Command {
     /// Define the kinds of certificate CAs issue
     #[command(subcommand)]
     Template(TemplateCommand),
-    /// Decide who may request certificates for which names
+    /// Decide who can request certificates for which names
     #[command(subcommand)]
     Name(NameCommand),
     /// Print help for pki or one of its commands
@@ -90,7 +90,7 @@ pub enum Ca {
         /// Set its lifetime in days (default: 1825)
         #[arg(long, value_name = "days", default_value_t = SUBORDINATE_LIFETIME_DAYS, hide_default_value = true)]
         lifetime: u32,
-        /// Limit how many CAs may sit below it
+        /// Limit how many CAs can sit below it
         #[arg(long, value_name = "count")]
         path_length: Option<u8>,
         /// Write the certificate to a file (default: standard output)
@@ -335,7 +335,7 @@ pub struct TemplateFields {
         hide_possible_values = true,
     )]
     pub issuance: Option<String>,
-    /// Set who may enrol, as SDDL
+    /// Set who can enroll, as SDDL
     #[arg(long, value_name = "sddl")]
     pub enroll_security: Option<String>,
 }
@@ -358,7 +358,7 @@ impl TemplateFields {
 pub enum NameCommand {
     /// List the names with settings of their own
     List,
-    /// Show who may request a name, and who owns it
+    /// Show who can request a name, and who owns it
     Show {
         /// The name, such as lab.home, jack@home or @home
         #[arg(value_name = "name")]
@@ -379,7 +379,7 @@ pub enum NameCommand {
         #[arg(value_name = "name")]
         name: String,
     },
-    /// Set who may request a name and the names below it
+    /// Set who can request a name and the names below it
     #[command(override_usage = "pki name set-security [options] <name> <sddl>
        pki name set-security [options] <name> --inherit")]
     SetSecurity {
@@ -538,7 +538,7 @@ pub struct Create {
     /// Set its lifetime in days (default: 3650 for a root, 1825 otherwise)
     #[arg(long, value_name = "days")]
     pub lifetime: Option<u32>,
-    /// Limit how many CAs may sit below it
+    /// Limit how many CAs can sit below it
     #[arg(long, value_name = "count")]
     pub path_length: Option<u8>,
     #[command(flatten)]

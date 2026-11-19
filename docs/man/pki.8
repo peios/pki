@@ -157,7 +157,7 @@ It asks
 .B pkid
 to create, sign and change CAs, and
 .B pkid
-decides whether you may, by your own access token: what
+decides whether you can, by your own access token: what
 .B pki
 can do is exactly what you can.
 .PP
@@ -315,7 +315,7 @@ Show a request in full, including who submitted it, who decided it and why it wa
 .TP
 .BI "request approve " "ca request"
 Approve a held request, issuing its certificate.
-Only an officer of the CA may, and never for a request they submitted themselves.
+Only an officer of the CA can, and never for a request they submitted themselves.
 .TP
 .BI "request deny " "ca request"
 Refuse a held request.
@@ -367,7 +367,7 @@ Give at least one name, with
 .B \-\-email
 or
 .BR \-\-upn ;
-each may be repeated.
+each can be repeated.
 The key never reaches
 .BR pkid ,
 which sees only the request.
@@ -403,7 +403,7 @@ Current versions of OpenSSL, Windows and Firefox import it; Apple systems older 
 List the templates: name, GUID, whether they issue at once or hold for approval, lifetime, and purposes.
 .TP
 .BI "template show " template
-Show a template in full, with its enrolment descriptor in SDDL and the CAs that issue from it.
+Show a template in full, with its enrollment descriptor in SDDL and the CAs that issue from it.
 .TP
 .BI "template create " name
 Create a template.
@@ -432,7 +432,7 @@ A template a CA still issues from cannot be deleted.
 List the names that have settings of their own: their owner, and whether their descriptor is their own or inherited.
 .TP
 .BI "name show " name
-Show who may request
+Show who can request
 .I name
 \(em its request descriptor, in SDDL, and where it comes from \(em and who owns it.
 .TP
@@ -447,7 +447,7 @@ Remove
 A name with names below it, and a tree's root, cannot be removed.
 .TP
 .BI "name set\-security " "name sddl"
-Set who may request
+Set who can request
 .I name
 and, through entries marked to inherit (CI), the names below it.
 The rights are Request (0x1), which issues without approval, Request with approval (0x2), which holds the request for an officer, and Wildcard (0x4), which also permits
@@ -552,7 +552,7 @@ For
 .B ca create
 and
 .BR "ca sign" :
-how many CAs may sit below the new one.
+how many CAs can sit below the new one.
 With none given there is no limit; 0 lets it issue only to people and machines.
 .SS Changing a CA
 These apply to
@@ -576,7 +576,7 @@ These apply to
 .B template create
 and
 .BR "template set" .
-Each list option may be repeated, and the values given replace the template's list.
+Each list option can be repeated, and the values given replace the template's list.
 .TP
 .BI \-\-purpose " purpose"
 An extended key usage certificates carry:
@@ -604,7 +604,7 @@ How long certificates last, from 1 to 7305 days.
 How many days before expiry renewal is due, fewer than the lifetime.
 .TP
 .BI \-\-key\-algorithm " algorithm"
-A kind of key requests may contain:
+A kind of key requests can contain:
 .BR ecdsa\-p256 ,
 .BR ecdsa\-p384 ,
 or
@@ -614,7 +614,7 @@ for RSA keys of at least
 bits, from 2048 to 8192.
 .TP
 .BI \-\-name\-type " type"
-A kind of name certificates may carry:
+A kind of name certificates can carry:
 .BR dns ,
 .B email
 or
@@ -634,8 +634,8 @@ the default, issues what policy permits at once;
 holds every request for an officer.
 .TP
 .BI \-\-enroll\-security " sddl"
-Who may use the template: Enrol (0x1) lets a principal submit requests under it.
-Enrolment alone grants nothing; every name requested must also be permitted.
+Who can use the template: Enroll (0x1) lets a principal submit requests under it.
+Enrollment alone grants nothing; every name requested must also be permitted.
 .SH NAMES
 A name is a host name, such as
 .BR radius.lab.home ,
@@ -658,7 +658,7 @@ A wildcard name has no entry of its own: Wildcard on
 permits
 .BR *.lab.home .
 .PP
-A descriptor given in SDDL may use SID aliases, such as
+A descriptor given in SDDL can use SID aliases, such as
 .B BA
 for Administrators and
 .B AU
@@ -954,7 +954,7 @@ Usage error: an unknown command or option, a missing argument, a value that is n
 would refuse, or a CA name more than one CA has.
 .TP
 .B 3
-Access denied: you may not do this to the CA, change the configuration, or run
+Access denied: you cannot do this to the CA, change the configuration, or run
 .BR setup ,
 or the request you would approve is your own.
 .TP
@@ -1006,5 +1006,7 @@ Let the RADIUS server's principal request its own name without approval, through
 .B pki cert revoke """Lab Issuing""" 4f:1a:09 \-\-reason key\-compromise
 Revoke a certificate whose key was exposed.
 .SH SEE ALSO
-.BR pkid (8),
-.BR regman (1)
+.BR regman (1),
+.BR pkid (8)
+.PP
+https://learn.peios.org/peios/using-peios/certificate-authority/overview

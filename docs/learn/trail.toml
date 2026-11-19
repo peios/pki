@@ -1,0 +1,25 @@
+sitename = "Peios Learn"
+title = "Certificate Authority"
+description = "Issuing certificates from Peios with pkid and the pki command."
+footer = "Peios Learn"
+featured = ["peios"]
+
+[lint]
+rules = [
+  "spelling", "em-dash", "double-hyphen", "curly-quotes",
+  "invisible-characters", "exclamation", "ampersand", "double-space",
+  "title-case", "heading-case", "heading-punctuation", "heading-levels",
+  "code-language", "shell-prompt", "line-length", "hex-case", "serial-comma",
+]
+line_length = 78
+proper_nouns = [
+  "Peios", "GXWI", "Linux", "Windows", "macOS", "iOS", "OpenSSL", "Wi-Fi",
+  "pkid", "pki", "trustd", "peinit", "regman", "evman", "Registry",
+  "CA", "CAs", "TLS", "EAP-TLS", "PKCS", "SID", "SIDs", "SDDL", "GUID",
+  "DNS", "UPN", "RFC", "ECDSA", "RSA", "P-256", "P-384", "AES-256",
+  "Administrators", "Authenticated Users", "Users", "SYSTEM",
+  "PRINCIPAL SELF", "Server", "Device",
+]
+
+[lint.spelling]
+banned-words = ["banned-words.txt"]

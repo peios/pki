@@ -158,7 +158,7 @@ fn template_text(snapshot: &Snapshot, id: &str, values: &Values) -> String {
                 .to_owned(),
         ),
         (
-            "Enrolment",
+            "Enrollment",
             values
                 .binary("EnrollSecurity")
                 .ok()

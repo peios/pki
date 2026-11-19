@@ -18,7 +18,7 @@ An invalid configuration stops pkid issuing until it is corrected. pkid
 never issues from part of a configuration.
 
 Each key's own security descriptor controls who may change it. Request and
-enrolment rights are separate descriptors stored as values, so editing a
+enrollment rights are separate descriptors stored as values, so editing a
 policy and being granted by it are never the same right.
 
 --- machine\software\pki\settings
@@ -168,12 +168,12 @@ default: (required)
 valid: a self-relative security descriptor
 applies: new requests
 
-Who may use this template. Enrol (0x1) permits requests; Auto-enrol (0x2) is
-reserved for automatic enrolment.
+Who may use this template. Enroll (0x1) permits requests; Auto-enroll (0x2) is
+reserved for automatic enrollment.
 
-Enrolment alone grants nothing: every requested name must also be permitted
+Enrollment alone grants nothing: every requested name must also be permitted
 by its RequestSecurity. The shipped templates let any authenticated
-principal enrol, O:SYG:SYD:(A;;0x1;;;AU)(A;;0x3;;;BA)(A;;0x3;;;SY).
+principal enroll, O:SYG:SYD:(A;;0x1;;;AU)(A;;0x3;;;BA)(A;;0x3;;;SY).
 
 --- machine\software\pki\names
 canonical: Machine\Software\Pki\Names
@@ -306,7 +306,7 @@ Manage Certificates (0x4) approves and denies held requests and revokes
 certificates; nobody approves their own request. Manage CA (0x8) changes
 the CA and its key.
 
-Submitting needs Request here, enrolment on the template and a request
+Submitting needs Request here, enrollment on the template and a request
 right on every name.
 
 --- machine\software\pki\authorities\<id> templates
