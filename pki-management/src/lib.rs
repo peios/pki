@@ -6,8 +6,13 @@
 //! `pkid.regman`). It writes only its CA records; templates, names and
 //! provisioning are an administrator's, through this crate.
 
+pub mod names;
 pub mod provision;
 pub mod registry;
+pub mod security;
+pub mod write;
+
+use std::io;
 
 use pki_policy::Values;
 
@@ -35,4 +40,21 @@ pub struct Snapshot {
     pub principals: Vec<(Vec<String>, Values)>,
     /// `Authorities\<id>`, by identifier.
     pub authorities: Vec<(String, Values)>,
+}
+
+/// A new random GUID, as templates are named by.
+pub fn new_guid() -> io::Result<String> {
+    let mut bytes = [0u8; 16];
+    peios_crypto::random::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
+    bytes[6] = (bytes[6] & 0x0f) | 0x40;
+    bytes[8] = (bytes[8] & 0x3f) | 0x80;
+    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
+    Ok(format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    ))
 }

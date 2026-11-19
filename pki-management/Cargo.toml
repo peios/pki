@@ -10,5 +10,6 @@ publish.workspace = true
 libc = "0.2"
 peios.workspace = true
 peios-crypto.workspace = true
+pki-core = { path = "../pki-core" }
 pki-policy = { path = "../pki-policy" }
 pkid-core = { path = "../pkid-core" }

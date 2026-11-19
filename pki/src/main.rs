@@ -2,6 +2,7 @@
 //! Registry. See pki(8).
 
 mod cli;
+mod config;
 mod failure;
 mod files;
 mod host;

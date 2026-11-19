@@ -6,14 +6,17 @@ use std::io;
 use std::path::PathBuf;
 
 use pki_management::provision::Seeded;
+use pki_management::Snapshot;
+use pki_policy::{RegData, SecurityBlob, Values};
 use pkid_client::ClientError;
 use pkid_core::{
     AuthorityInfo, ErrorCode, Issuer, KeySpec, Reply, Request, TemplateInfo, WireError,
 };
+use serde_json::Value;
 use zeroize::Zeroizing;
 
 use crate::failure::Kind;
-use crate::host::{Host, TemplateName};
+use crate::host::Host;
 use crate::{cli, parse, run, Stop};
 
 const PASSPHRASE: &str = "correct horse battery staple";
@@ -22,7 +25,10 @@ const PASSPHRASE: &str = "correct horse battery staple";
 #[derive(Default)]
 struct Fake {
     authorities: Vec<AuthorityInfo>,
-    templates: Vec<TemplateName>,
+    snapshot: Snapshot,
+    /// Each Registry change, in order.
+    writes: RefCell<Vec<Write>>,
+    warnings: RefCell<Vec<String>>,
     /// What pkid replies to anything but a listing.
     reply: RefCell<Option<Result<Reply, ClientError>>>,
     /// The answers to prompts, in order.
@@ -68,10 +74,6 @@ impl Host for Fake {
             .expect("the test says what pkid replies")
     }
 
-    fn templates(&self) -> io::Result<Vec<TemplateName>> {
-        Ok(self.templates.clone())
-    }
-
     fn setup(&self) -> io::Result<Seeded> {
         Err(io::Error::from(io::ErrorKind::PermissionDenied))
     }
@@ -83,6 +85,101 @@ impl Host for Fake {
             return Err(io::Error::new(io::ErrorKind::NotFound, "no terminal"));
         }
         Ok(Zeroizing::new(answers.remove(0).to_owned()))
+    }
+
+    fn snapshot(&self) -> io::Result<Snapshot> {
+        Ok(self.snapshot.clone())
+    }
+
+    fn change(&self, path: &str, set: &Values, remove: &[&str]) -> io::Result<()> {
+        self.writes.borrow_mut().push(Write::Change(
+            path.into(),
+            set.clone(),
+            remove.iter().map(|r| r.to_string()).collect(),
+        ));
+        Ok(())
+    }
+
+    fn put(&self, path: &str, set: &Values, remove: &[&str]) -> io::Result<()> {
+        self.writes.borrow_mut().push(Write::Put(
+            path.into(),
+            set.clone(),
+            remove.iter().map(|r| r.to_string()).collect(),
+        ));
+        Ok(())
+    }
+
+    fn create(&self, path: &str, set: &Values) -> io::Result<()> {
+        self.writes
+            .borrow_mut()
+            .push(Write::Create(path.into(), set.clone()));
+        Ok(())
+    }
+
+    fn delete(&self, path: &str) -> io::Result<()> {
+        self.writes.borrow_mut().push(Write::Delete(path.into()));
+        Ok(())
+    }
+
+    fn new_guid(&self) -> io::Result<String> {
+        Ok("bbbbbbbb-0000-4000-8000-000000000009".into())
+    }
+
+    fn warn(&self, warning: &str) {
+        self.warnings.borrow_mut().push(warning.to_owned());
+    }
+}
+
+/// A Registry change a command made.
+#[derive(Debug, Clone, PartialEq)]
+enum Write {
+    Change(String, Values, Vec<String>),
+    Put(String, Values, Vec<String>),
+    Create(String, Values),
+    Delete(String),
+}
+
+fn binary_sd(text: &str) -> SecurityBlob {
+    SecurityBlob::new(
+        peios::security::sddl::parse(text)
+            .unwrap()
+            .as_bytes()
+            .to_vec(),
+    )
+}
+
+/// The configuration `pki setup` seeds, with the Issuing CA issuing from
+/// Server, and a few names.
+fn seeded() -> Snapshot {
+    let enroll = binary_sd(pki_policy::DEFAULT_TEMPLATE_ENROLL_SDDL);
+    let root = pki_policy::defaults::name_root(&binary_sd(pki_policy::DEFAULT_NAME_ROOT_SDDL));
+    let mut issuing = Values::new();
+    issuing.insert("Name", RegData::Sz("Issuing".into()));
+    issuing.insert(
+        "Templates",
+        RegData::MultiSz(vec!["aaaaaaaa-0000-4000-8000-000000000001".into()]),
+    );
+    let mut lab = Values::new();
+    lab.insert("Owner", RegData::Sz("S-1-5-21-1-2-3-1001".into()));
+    Snapshot {
+        settings: Values::new(),
+        templates: vec![
+            (
+                "aaaaaaaa-0000-4000-8000-000000000001".into(),
+                pki_policy::defaults::server_template(&enroll),
+            ),
+            (
+                "aaaaaaaa-0000-4000-8000-000000000002".into(),
+                pki_policy::defaults::device_template(&enroll),
+            ),
+        ],
+        dns: vec![
+            (Vec::new(), root.clone()),
+            (vec!["home".into()], Values::new()),
+            (vec!["home".into(), "lab".into()], lab),
+        ],
+        principals: vec![(Vec::new(), root)],
+        authorities: vec![("22222222-2222-4222-8222-222222222222".into(), issuing)],
     }
 }
 
@@ -125,16 +222,7 @@ fn fake() -> Fake {
                 "service:4444",
             ),
         ],
-        templates: vec![
-            TemplateName {
-                id: "aaaaaaaa-0000-4000-8000-000000000001".into(),
-                name: "Server".into(),
-            },
-            TemplateName {
-                id: "aaaaaaaa-0000-4000-8000-000000000002".into(),
-                name: "Device".into(),
-            },
-        ],
+        snapshot: seeded(),
         ..Fake::default()
     }
 }
@@ -810,4 +898,223 @@ fn get_writes_the_certificate_issued_for_a_request() {
         .unwrap()
         .starts_with("-----BEGIN CERTIFICATE-----"));
     std::fs::remove_file(out).unwrap();
+}
+
+// Templates and names.
+
+const SERVER: &str = "aaaaaaaa-0000-4000-8000-000000000001";
+const DEVICE: &str = "aaaaaaaa-0000-4000-8000-000000000002";
+
+fn writes(host: &Fake) -> Vec<Write> {
+    host.writes.borrow().clone()
+}
+
+fn template_key(id: &str) -> String {
+    format!("Machine\\Software\\Pki\\Templates\\{id}")
+}
+
+#[test]
+fn templates_list_with_the_cas_that_use_them() {
+    let output = running(&fake(), "template list").unwrap();
+    assert!(output.text.contains("Server"), "{}", output.text);
+    assert_eq!(output.json["templates"][0]["used_by"][0], "Issuing");
+    assert_eq!(
+        output.json["templates"][1]["used_by"]
+            .as_array()
+            .unwrap()
+            .len(),
+        0
+    );
+}
+
+#[test]
+fn a_template_is_checked_by_policy_before_it_is_written() {
+    let host = fake();
+    // The Server template's renewal window is 30 days, which a 30-day
+    // lifetime doesn't leave room for.
+    let failure = running(&host, "template create Short --from Server --lifetime 30").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+    assert!(failure.message.contains("RenewalWindowDays"), "{failure:?}");
+    let failure = running(
+        &host,
+        "template create Odd --from Server --purpose anything",
+    )
+    .unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+    assert!(writes(&host).is_empty());
+
+    let failure = running(&host, "template create Bare --purpose server-auth").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+    assert!(failure.message.contains("--from"), "{failure:?}");
+
+    let failure = running(&host, "template create server --from Device").unwrap_err();
+    assert_eq!(failure.kind, Kind::Exists);
+}
+
+#[test]
+fn a_new_template_starts_from_another() {
+    let host = fake();
+    running(
+        &host,
+        "template create Web --from Server --lifetime 60 --issuance approval",
+    )
+    .unwrap();
+    let written = writes(&host);
+    let [Write::Create(path, values)] = written.as_slice() else {
+        panic!("{written:?}")
+    };
+    assert_eq!(*path, template_key("bbbbbbbb-0000-4000-8000-000000000009"));
+    assert_eq!(values.sz("Name").unwrap(), Some("Web"));
+    assert_eq!(values.dword("LifetimeDays").unwrap(), Some(60));
+    assert_eq!(values.sz("Issuance").unwrap(), Some("approval"));
+    assert_eq!(values.multi_sz("Purposes").unwrap(), ["server-auth"]);
+    assert!(pki_policy::Template::from_values(values).is_ok());
+}
+
+#[test]
+fn a_new_template_without_a_source_takes_the_shipped_choices() {
+    let host = fake();
+    running(
+        &host,
+        "template create Mail --purpose email-protection --name-type email --lifetime 365",
+    )
+    .unwrap();
+    let written = writes(&host);
+    let [Write::Create(_, values)] = written.as_slice() else {
+        panic!()
+    };
+    assert_eq!(values.multi_sz("KeyUsages").unwrap(), ["digital-signature"]);
+    assert!(values.binary("EnrollSecurity").unwrap().is_some());
+}
+
+#[test]
+fn set_writes_only_what_changes() {
+    let host = fake();
+    running(&host, "template set server --issuance approval --name Web").unwrap();
+    let written = writes(&host);
+    let [Write::Change(path, values, removed)] = written.as_slice() else {
+        panic!()
+    };
+    assert_eq!(*path, template_key(SERVER));
+    assert_eq!(values.iter().count(), 2);
+    assert!(removed.is_empty());
+    let failure = running(&fake(), "template set Server").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+}
+
+#[test]
+fn a_template_in_use_is_not_deleted() {
+    let host = fake();
+    let failure = running(&host, "template delete Server").unwrap_err();
+    assert!(
+        failure.message.contains("CA Issuing issues from it"),
+        "{failure:?}"
+    );
+    assert!(writes(&host).is_empty());
+    running(&host, "template delete Device").unwrap();
+    assert_eq!(writes(&host), [Write::Delete(template_key(DEVICE))]);
+}
+
+#[test]
+fn a_name_shows_where_its_descriptor_comes_from() {
+    let output = running(&fake(), "name show radius.lab.home").unwrap();
+    assert!(output.text.contains("inherited from ."), "{}", output.text);
+    assert!(output.text.contains(";BA)"), "{}", output.text);
+    assert_eq!(output.json["owner"], Value::Null);
+    let output = running(&fake(), "name show lab.home").unwrap();
+    assert_eq!(output.json["owner"], "S-1-5-21-1-2-3-1001");
+}
+
+#[test]
+fn a_names_descriptor_keeps_what_it_inherits() {
+    let host = fake();
+    let output = running(&host, "name set-security lab.home D:(A;CI;0x2;;;AU)").unwrap();
+    let written = writes(&host);
+    let [Write::Put(path, values, _)] = written.as_slice() else {
+        panic!()
+    };
+    assert_eq!(*path, "Machine\\Software\\Pki\\Names\\Dns\\home\\lab");
+    let written =
+        peios::security::sddl::format(values.binary("RequestSecurity").unwrap().unwrap()).unwrap();
+    // Its own entry, and the root's, which a bare value would have dropped.
+    assert!(written.contains(";AU)"), "{written}");
+    assert!(
+        written.contains(";BA)") && written.contains(";PS)"),
+        "{written}"
+    );
+    assert!(output.text.contains("its own"), "{}", output.text);
+    assert!(host.warnings.borrow().is_empty());
+}
+
+#[test]
+fn broad_grants_and_owners_are_warned_of() {
+    let host = fake();
+    running(&host, "name set-security lab.home D:(A;CI;0x1;;;AU)").unwrap();
+    let warnings = host.warnings.borrow().clone();
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
+    assert!(
+        warnings[0].starts_with("Authenticated Users may now request"),
+        "{warnings:?}"
+    );
+
+    let host = fake();
+    running(&host, "name set-owner jack@home S-1-5-32-545").unwrap();
+    assert!(host.warnings.borrow()[0].starts_with("Users owns this name"));
+    let written = writes(&host);
+    let [Write::Put(path, values, _)] = written.as_slice() else {
+        panic!()
+    };
+    assert_eq!(
+        *path,
+        "Machine\\Software\\Pki\\Names\\Principals\\home\\@jack"
+    );
+    assert_eq!(values.sz("Owner").unwrap(), Some("S-1-5-32-545"));
+}
+
+#[test]
+fn names_are_removed_leaf_first_and_roots_never() {
+    let host = fake();
+    let failure = running(&host, "name remove home").unwrap_err();
+    assert!(
+        failure.message.contains("names are listed below it"),
+        "{failure:?}"
+    );
+    running(&host, "name remove lab.home").unwrap();
+    assert_eq!(
+        writes(&host),
+        [Write::Delete(
+            "Machine\\Software\\Pki\\Names\\Dns\\home\\lab".into()
+        )]
+    );
+    assert_eq!(
+        running(&fake(), "name remove .").unwrap_err().kind,
+        Kind::Usage
+    );
+    assert_eq!(
+        running(&fake(), "name set-security . --inherit")
+            .unwrap_err()
+            .kind,
+        Kind::Usage
+    );
+}
+
+#[test]
+fn names_that_exist_or_cannot_exist_are_refused() {
+    assert_eq!(
+        running(&fake(), "name add lab.home").unwrap_err().kind,
+        Kind::Exists
+    );
+    assert_eq!(
+        running(&fake(), "name add *.lab.home").unwrap_err().kind,
+        Kind::Usage
+    );
+    assert_eq!(
+        running(&fake(), "name add www.lab.home --owner nobody")
+            .unwrap_err()
+            .kind,
+        Kind::Usage
+    );
+    let host = fake();
+    running(&host, "name add www.lab.home --owner S-1-5-21-1-2-3-1002").unwrap();
+    assert!(matches!(writes(&host).as_slice(), [Write::Create(..)]));
 }

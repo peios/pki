@@ -82,6 +82,49 @@ pki \- manage the Peios certificate authority
 .RB [ \-\-reason
 .IR reason ]
 .br
+.B pki template list
+.br
+.B pki template show
+.I template
+.br
+.B pki template create
+.I name
+.RB [ \-\-from
+.IR template ]
+.RI [ template-options ]
+.br
+.B pki template set
+.I template
+.RB [ \-\-name
+.IR name ]
+.RI [ template-options ]
+.br
+.B pki template delete
+.I template
+.br
+.B pki name list
+.br
+.B pki name show
+.I name
+.br
+.B pki name add
+.I name
+.RB [ \-\-owner
+.IR sid ]
+.br
+.B pki name remove
+.I name
+.br
+.B pki name set\-security
+.I name sddl
+|
+.B \-\-inherit
+.br
+.B pki name set\-owner
+.I name sid
+|
+.B \-\-none
+.br
 .B pki help
 .RI [ command ]
 .SH DESCRIPTION
@@ -111,6 +154,22 @@ asks for the passphrase each time the key signs.
 Name a CA by its ID or by its name.
 Names compare without regard to case; when two CAs share a name, use the ID.
 Name a template the same way, by its GUID or its name.
+.PP
+Templates and names are not
+.BR pkid 's
+to change but an administrator's:
+.B pki
+writes them to the Registry under
+.BR Machine\eSoftware\ePki ,
+and
+.B pkid
+takes each change up as soon as it is written.
+.B pki
+checks a change by the rules
+.B pkid
+loads it with before writing it, since
+.B pkid
+issues nothing while any of its configuration is invalid.
 .PP
 .B pki
 reads certificates and requests in PEM or DER, and writes them in PEM.
@@ -274,6 +333,74 @@ or
 .BR privilege\-withdrawn .
 Revocation cannot be undone.
 .TP
+.B template list
+List the templates: name, GUID, whether they issue at once or hold for approval, lifetime, and purposes.
+.TP
+.BI "template show " template
+Show a template in full, with its enrolment descriptor in SDDL and the CAs that issue from it.
+.TP
+.BI "template create " name
+Create a template.
+.BI \-\-from " template"
+starts from a copy of another; without it, give at least
+.BR \-\-purpose ,
+.B \-\-name\-type
+and
+.BR \-\-lifetime ,
+and the rest are the shipped templates' choices.
+A new template is offered by no CA until
+.B ca set
+adds it.
+.TP
+.BI "template set " template
+Change a template.
+Options not given leave their part of it as it is.
+.TP
+.BI "template delete " template
+Delete a template.
+A template a CA still issues from cannot be deleted.
+.TP
+.B name list
+List the names that have settings of their own: their owner, and whether their descriptor is their own or inherited.
+.TP
+.BI "name show " name
+Show who may request
+.I name
+\(em its request descriptor, in SDDL, and where it comes from \(em and who owns it.
+.TP
+.BI "name add " name
+Add
+.I name
+to its tree, optionally with an owner.
+.TP
+.BI "name remove " name
+Remove
+.IR name .
+A name with names below it, and a tree's root, cannot be removed.
+.TP
+.BI "name set\-security " "name sddl"
+Set who may request
+.I name
+and, through entries marked to inherit (CI), the names below it.
+The rights are Request (0x1), which issues without approval, Request with approval (0x2), which holds the request for an officer, and Wildcard (0x4), which also permits
+.BI *. name .
+PRINCIPAL SELF (PS) matches the name's owner.
+.B pki
+adds the entries
+.I name
+inherits from above, so that grants made higher up, such as Administrators', still apply.
+.B \-\-inherit
+removes the name's own descriptor instead, so that it inherits again.
+.TP
+.BI "name set\-owner " "name sid"
+Make the principal
+.I sid
+the owner of exactly
+.IR name ;
+.B \-\-none
+leaves it without one.
+Certificates for names a principal owns carry its SID.
+.TP
 .BR help " [\fIcommand\fR]"
 Print help for
 .B pki
@@ -376,6 +503,101 @@ Repeat for more.
 .TP
 .B \-\-no\-crls
 Name no CRL distribution points.
+.SS Templates
+These apply to
+.B template create
+and
+.BR "template set" .
+Each list option may be repeated, and the values given replace the template's list.
+.TP
+.BI \-\-purpose " purpose"
+An extended key usage certificates carry:
+.BR server\-auth ,
+.BR client\-auth ,
+.BR code\-signing ,
+.BR email\-protection ,
+.BR time\-stamping ,
+.BR ocsp\-signing ,
+or a dotted object identifier.
+.TP
+.BI \-\-key\-usage " usage"
+A key usage certificates carry:
+.BR digital\-signature ,
+.BR content\-commitment ,
+.BR key\-encipherment ,
+.B data\-encipherment
+or
+.BR key\-agreement .
+.TP
+.BI \-\-lifetime " days"
+How long certificates last, from 1 to 7305 days.
+.TP
+.BI \-\-renewal\-window " days"
+How many days before expiry renewal is due, fewer than the lifetime.
+.TP
+.BI \-\-key\-algorithm " algorithm"
+A kind of key requests may contain:
+.BR ecdsa\-p256 ,
+.BR ecdsa\-p384 ,
+or
+.BI rsa\- bits
+for RSA keys of at least
+.I bits
+bits, from 2048 to 8192.
+.TP
+.BI \-\-name\-type " type"
+A kind of name certificates may carry:
+.BR dns ,
+.B email
+or
+.BR upn .
+.TP
+.BI \-\-common\-name " source"
+Where the common name comes from:
+.BR none ,
+.BR first\-name ,
+the default, or
+.BR owner\-display\-name .
+.TP
+.BI \-\-issuance " issuance"
+.BR immediate ,
+the default, issues what policy permits at once;
+.B approval
+holds every request for an officer.
+.TP
+.BI \-\-enroll\-security " sddl"
+Who may use the template: Enrol (0x1) lets a principal submit requests under it.
+Enrolment alone grants nothing; every name requested must also be permitted.
+.SH NAMES
+A name is a host name, such as
+.BR radius.lab.home ,
+or a principal name,
+.IR user @ domain ,
+such as
+.BR jack@home ,
+as email and UPN certificates carry.
+.BI @ domain
+names every principal at
+.IR domain ,
+whose descriptor they inherit.
+.B .
+and
+.B @
+name the roots of the two trees.
+Names compare without regard to case.
+A wildcard name has no entry of its own: Wildcard on
+.B lab.home
+permits
+.BR *.lab.home .
+.PP
+A descriptor given in SDDL may use SID aliases, such as
+.B BA
+for Administrators and
+.B AU
+for Authenticated Users.
+.B pki
+warns when a name's own descriptor lets a broad group, such as Authenticated Users or Users, request it without approval, and when such a group is made an owner: every member could then obtain certificates for the name.
+Prefer Request with approval (0x2) for groups.
 .SH PASSPHRASES
 A key in a sealed file signs only with its passphrase, and
 .B pki
@@ -529,6 +751,58 @@ adding the
 .B certificate
 in PEM.
 .PP
+A template has
+.BR id ,
+.BR name ,
+.BR purposes ,
+.BR key_usages ,
+.BR lifetime_days ,
+.BR renewal_window_days ,
+.BR key_algorithms ,
+.BR name_types ,
+.BR common_name ,
+.BR issuance ,
+.B enroll_security
+(SDDL) and
+.B used_by
+(the CAs that issue from it).
+.B template list
+prints
+.BR templates ;
+.B template show
+prints one, and
+.B template create
+and
+.B template set
+print it under
+.B created
+or
+.BR changed .
+.PP
+A name has
+.BR name ,
+.B tree
+.RB ( Dns
+or
+.BR Principals ),
+.BR exists ,
+.BR owner ,
+.B security
+(SDDL) and
+.BR inherited .
+.B name list
+prints
+.BR names ;
+.B name show
+prints one, and
+.B name add
+and the
+.B name set
+commands print it under
+.B added
+or
+.BR changed .
+.PP
 Times are in RFC 3339, in UTC, and people are named by their SIDs.
 A file written is named by
 .B written
@@ -559,18 +833,20 @@ Failure, such as
 not running, a passphrase that is wrong or too short, a certificate that does not fit its CA, or a request the CA refused.
 .TP
 .B 2
-Usage error: an unknown command or option, a missing argument, a value that is not valid, or a CA name more than one CA has.
+Usage error: an unknown command or option, a missing argument, a value that is not valid, such as a template
+.B pkid
+would refuse, or a CA name more than one CA has.
 .TP
 .B 3
-Access denied: you may not do this to the CA, or run
+Access denied: you may not do this to the CA, change the configuration, or run
 .BR setup ,
 or the request you would approve is your own.
 .TP
 .B 4
-Not found: no CA, template, request or certificate is the one given, or a file does not exist.
+Not found: no CA, template, name, request or certificate is the one given, or a file does not exist.
 .TP
 .B 5
-Already exists: an output file exists, or the CA already has its certificate.
+Already exists: an output file exists, the CA already has its certificate, or a template or name of that name exists.
 .SH EXAMPLES
 .TP
 .B pki setup
@@ -596,6 +872,17 @@ Ask for a server certificate.
 .TP
 .B pki request list """Lab Issuing""" \-\-status pending
 List the requests waiting for an officer.
+.TP
+.B pki template create Web \-\-from Server \-\-issuance approval
+Make a server template whose every request waits for an officer.
+.TP
+.B pki name set\-security lab.home """D:(A;CI;0x2;;;AU)"""
+Let anyone signed in ask for certificates for names under
+.BR lab.home ,
+each held for approval.
+.TP
+.B pki name set\-owner radius.lab.home S\-1\-5\-21\-1\-2\-3\-1105
+Let the RADIUS server's principal request its own name without approval, through the roots' PRINCIPAL SELF grant.
 .TP
 .B pki cert revoke """Lab Issuing""" 4f:1a:09 \-\-reason key\-compromise
 Revoke a certificate whose key was exposed.

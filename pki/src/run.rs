@@ -11,9 +11,9 @@ use crate::cli::{self, Ca, Command};
 use crate::failure::{Failure, Kind};
 use crate::files::{self, Reserved};
 use crate::host::Host;
-use crate::issue;
 use crate::secret;
 use crate::show::{self, Output};
+use crate::{config, issue};
 
 pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
     match command {
@@ -21,6 +21,8 @@ pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
         Command::Ca(command) => ca(host, command),
         Command::Request(command) => issue::request(host, command),
         Command::Cert(command) => issue::cert(host, command),
+        Command::Template(command) => config::template(host, command),
+        Command::Name(command) => config::name(host, command),
         Command::Help { .. } => unreachable!("main prints help"),
     }
 }
@@ -109,31 +111,10 @@ fn resolve_templates(host: &dyn Host, names: &[String]) -> Result<Vec<String>, F
     if names.is_empty() {
         return Ok(Vec::new());
     }
-    let known = host
-        .templates()
-        .map_err(|error| Failure::io(&error).context("reading the templates"))?;
+    let snapshot = config::snapshot(host)?;
     names
         .iter()
-        .map(|text| {
-            if let Some(template) = known.iter().find(|t| t.id.eq_ignore_ascii_case(text)) {
-                return Ok(template.id.clone());
-            }
-            let named: Vec<_> = known
-                .iter()
-                .filter(|t| t.name.to_lowercase() == text.to_lowercase())
-                .collect();
-            match named.as_slice() {
-                [one] => Ok(one.id.clone()),
-                [] => Err(Failure::new(
-                    Kind::NotFound,
-                    format!("no template '{text}'"),
-                )),
-                _ => Err(
-                    Failure::usage(format!("more than one template is named '{text}'"))
-                        .hint("Name the template by its GUID."),
-                ),
-            }
-        })
+        .map(|text| config::resolve_template(&snapshot, text).map(|(id, _)| id))
         .collect()
 }
 

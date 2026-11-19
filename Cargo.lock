@@ -653,10 +653,12 @@ version = "0.1.0"
 dependencies = [
  "clap",
  "libc",
+ "peios",
  "peios-crypto",
  "pem",
  "pki-keys",
  "pki-management",
+ "pki-policy",
  "pkid-client",
  "pkid-core",
  "serde_json",
@@ -696,6 +698,7 @@ dependencies = [
  "libc",
  "peios",
  "peios-crypto",
+ "pki-core",
  "pki-policy",
  "pkid-core",
 ]

@@ -4,7 +4,7 @@ use std::os::fd::AsFd;
 
 use peios::access::{AccessCheck, SubjectAccessDecision, SubjectGroup, SuppliedSubject};
 use peios::msgpack::{Reader, Writer};
-use peios::security::{sddl, AccessMask, GenericMapping, SdBuilder, SecurityDescriptor, WellKnown};
+use peios::security::{AccessMask, GenericMapping, SecurityDescriptor};
 use peios::token::Token;
 use pki_core::{DisplayName, Sid};
 use pki_pipeline::{Directory, PipelineError, Principal, CA_ALL};
@@ -39,15 +39,7 @@ fn check_failed(error: peios::Error) -> PolicyError {
 /// The descriptor a name below `parent` inherits: its container-inherit
 /// entries, by ordinary inheritance.
 fn inherit(parent: &SecurityBlob) -> Result<SecurityBlob, PolicyError> {
-    let system = peios::security::Sid::well_known(WellKnown::System);
-    let empty = SdBuilder::new()
-        .owner(system.as_ref())
-        .group(system.as_ref())
-        .build()
-        .map_err(check_failed)?;
-    let inherited =
-        sddl::reinherit(parent.as_bytes(), empty.as_bytes(), true).map_err(check_failed)?;
-    Ok(SecurityBlob::new(inherited.as_bytes().to_vec()))
+    pki_management::security::inherit(parent).map_err(check_failed)
 }
 
 /// A connected caller, checked by the token the kernel captured when it

@@ -44,6 +44,12 @@ pub enum Command {
     /// Find and revoke issued certificates
     #[command(subcommand)]
     Cert(Cert),
+    /// Define the kinds of certificate CAs issue
+    #[command(subcommand)]
+    Template(TemplateCommand),
+    /// Decide who may request certificates for which names
+    #[command(subcommand)]
+    Name(NameCommand),
     /// Print help for pki or one of its commands
     #[command(override_usage = "pki help [<command>]")]
     Help {
@@ -241,6 +247,163 @@ pub enum Cert {
             hide_possible_values = true,
         )]
         reason: String,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum TemplateCommand {
+    /// List the templates
+    List,
+    /// Show a template
+    Show {
+        /// The template, by name or GUID
+        #[arg(value_name = "template")]
+        template: String,
+    },
+    /// Create a template
+    Create {
+        /// The new template's name
+        #[arg(value_name = "name")]
+        name: String,
+        /// Start from a copy of another template
+        #[arg(long, value_name = "template")]
+        from: Option<String>,
+        #[command(flatten)]
+        fields: TemplateFields,
+    },
+    /// Change a template
+    Set {
+        /// The template, by name or GUID
+        #[arg(value_name = "template")]
+        template: String,
+        /// Rename it
+        #[arg(long, value_name = "name")]
+        name: Option<String>,
+        #[command(flatten)]
+        fields: TemplateFields,
+    },
+    /// Delete a template no CA issues from
+    Delete {
+        /// The template, by name or GUID
+        #[arg(value_name = "template")]
+        template: String,
+    },
+}
+
+/// A template's values, as given to create or change it. Each list given
+/// replaces the template's list.
+#[derive(Debug, Args)]
+pub struct TemplateFields {
+    /// Give certificates an extended key usage; repeat for more
+    #[arg(long = "purpose", value_name = "purpose")]
+    pub purposes: Vec<String>,
+    /// Give certificates a key usage; repeat for more
+    #[arg(long = "key-usage", value_name = "usage")]
+    pub key_usages: Vec<String>,
+    /// Set how long certificates last, in days
+    #[arg(long, value_name = "days")]
+    pub lifetime: Option<u32>,
+    /// Set how many days before expiry renewal is due
+    #[arg(long, value_name = "days")]
+    pub renewal_window: Option<u32>,
+    /// Accept a kind of key in requests; repeat for more
+    #[arg(long = "key-algorithm", value_name = "algorithm")]
+    pub key_algorithms: Vec<String>,
+    /// Allow a kind of name in certificates; repeat for more
+    #[arg(
+        long = "name-type",
+        value_name = "type",
+        value_parser = ["dns", "email", "upn"],
+        hide_possible_values = true,
+    )]
+    pub name_types: Vec<String>,
+    /// Choose where the common name comes from
+    #[arg(
+        long,
+        value_name = "source",
+        value_parser = ["none", "first-name", "owner-display-name"],
+        hide_possible_values = true,
+    )]
+    pub common_name: Option<String>,
+    /// Issue at once or hold every request for approval
+    #[arg(
+        long,
+        value_name = "issuance",
+        value_parser = ["immediate", "approval"],
+        hide_possible_values = true,
+    )]
+    pub issuance: Option<String>,
+    /// Set who may enrol, as SDDL
+    #[arg(long, value_name = "sddl")]
+    pub enroll_security: Option<String>,
+}
+
+impl TemplateFields {
+    pub fn is_empty(&self) -> bool {
+        self.purposes.is_empty()
+            && self.key_usages.is_empty()
+            && self.lifetime.is_none()
+            && self.renewal_window.is_none()
+            && self.key_algorithms.is_empty()
+            && self.name_types.is_empty()
+            && self.common_name.is_none()
+            && self.issuance.is_none()
+            && self.enroll_security.is_none()
+    }
+}
+
+#[derive(Debug, Subcommand)]
+pub enum NameCommand {
+    /// List the names with settings of their own
+    List,
+    /// Show who may request a name, and who owns it
+    Show {
+        /// The name, such as lab.home, jack@home or @home
+        #[arg(value_name = "name")]
+        name: String,
+    },
+    /// Add a name to a tree
+    Add {
+        /// The name, such as lab.home, jack@home or @home
+        #[arg(value_name = "name")]
+        name: String,
+        /// Make a principal the name's owner, by SID
+        #[arg(long, value_name = "sid")]
+        owner: Option<String>,
+    },
+    /// Remove a name with no names below it
+    Remove {
+        /// The name, such as lab.home, jack@home or @home
+        #[arg(value_name = "name")]
+        name: String,
+    },
+    /// Set who may request a name and the names below it
+    #[command(override_usage = "pki name set-security [options] <name> <sddl>
+       pki name set-security [options] <name> --inherit")]
+    SetSecurity {
+        /// The name, such as lab.home, jack@home or @home
+        #[arg(value_name = "name")]
+        name: String,
+        /// The descriptor, as SDDL
+        #[arg(value_name = "sddl", required_unless_present = "inherit")]
+        sddl: Option<String>,
+        /// Remove the name's own descriptor, so it inherits again
+        #[arg(long, conflicts_with = "sddl")]
+        inherit: bool,
+    },
+    /// Set or clear a name's owner
+    #[command(override_usage = "pki name set-owner [options] <name> <sid>
+       pki name set-owner [options] <name> --none")]
+    SetOwner {
+        /// The name, such as lab.home, jack@home or @home
+        #[arg(value_name = "name")]
+        name: String,
+        /// The owner, by SID
+        #[arg(value_name = "sid", required_unless_present = "none")]
+        owner: Option<String>,
+        /// Leave the name with no owner
+        #[arg(long, conflicts_with = "owner")]
+        none: bool,
     },
 }
 

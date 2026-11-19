@@ -64,23 +64,6 @@ pub fn authorities_grant() -> String {
     format!("O:SYG:SYD:(A;CI;GA;;;{SERVICE_SID})")
 }
 
-/// A new template GUID.
-fn guid() -> io::Result<String> {
-    let mut bytes = [0u8; 16];
-    peios_crypto::random::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
-    bytes[6] = (bytes[6] & 0x0f) | 0x40;
-    bytes[8] = (bytes[8] & 0x3f) | 0x80;
-    let hex: String = bytes.iter().map(|byte| format!("{byte:02x}")).collect();
-    Ok(format!(
-        "{}-{}-{}-{}-{}",
-        &hex[0..8],
-        &hex[8..12],
-        &hex[12..16],
-        &hex[16..20],
-        &hex[20..32]
-    ))
-}
-
 fn binary_sd(sddl_text: &str) -> io::Result<SecurityBlob> {
     let sd = sddl::parse(sddl_text).map_err(error)?;
     Ok(SecurityBlob::new(sd.as_bytes().to_vec()))
@@ -143,7 +126,7 @@ pub fn registry() -> io::Result<Seeded> {
     if empty {
         let enroll = binary_sd(DEFAULT_TEMPLATE_ENROLL_SDDL)?;
         for values in [server_template(&enroll), device_template(&enroll)] {
-            let id = guid()?;
+            let id = crate::new_guid()?;
             let (key, _) = create(&format!("{ROOT}\\Templates\\{id}"), &transaction)?;
             write_missing(&key, &values, &transaction)?;
             seeded.templates.push(id);
