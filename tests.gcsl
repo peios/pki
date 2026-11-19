@@ -41,12 +41,21 @@ def test client(
     }
 }
 
+def test daemon(
+    tests: List<rust.RustTest> = rust.tests(native_crates(), "pkid"),
+    given: List<{at: String, place: Dir | File}> = peios_rs.runtime(),
+) {
+    let each = for test in tests {
+        = rust.run_test(test, given = given, env = peios_rs.runtime_env())
+    }
+}
+
 def portable() -> List<String> {
     = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 }
 
 def native() -> List<String> {
-    = ["pkid-core", "pkid-client"]
+    = ["pkid", "pkid-core", "pkid-client"]
 }
 
 def test clippy(checked: List<List<{}>> = [

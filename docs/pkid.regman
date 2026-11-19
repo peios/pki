@@ -3,11 +3,19 @@ canonical: Machine\Software\Pki
 
 Configuration of the pkid certificate authority service.
 
-Administrators own these keys. pkid needs read and subtree-notify access and
-has no configuration-write authority. Write access to any key here is
-equivalent to administering the CA: it decides which certificates are issued
-and to whom. Grant it only to principals you would trust to issue any
-certificate. Every change is recorded as an event.
+Administrators own these keys. pkid needs read and subtree-notify access, and
+may write only Authorities, where it records the CAs administrators create
+through it. Write access to any key here is equivalent to administering the
+CA: it decides which certificates are issued and to whom. Grant it only to
+principals you would trust to issue any certificate. pkid records each
+configuration it loads as an event.
+
+`pki setup` creates this layout with its defaults: the Server and Device
+templates, both name-tree roots, and Authorities with pkid's grant. It adds
+only what is missing.
+
+An invalid configuration stops pkid issuing until it is corrected. pkid
+never issues from part of a configuration.
 
 Each key's own security descriptor controls who may change it. Request and
 enrolment rights are separate descriptors stored as values, so editing a
@@ -222,3 +230,77 @@ The principal that owns exactly this name. It is what PRINCIPAL SELF
 matches, and certificates for names it owns carry its SID. Ownership doesn't
 extend to names below this one. A group may own a name, which makes every
 member its owner; never make a broad group, such as Users, an owner.
+
+--- machine\software\pki\authorities
+canonical: Machine\Software\Pki\Authorities
+
+The CAs this pkid runs, one subkey per CA, named by an identifier that
+never changes. pkid writes these keys when an administrator with Manage CA
+creates, installs or changes a CA through it; its grant here is the only
+configuration it may write.
+
+--- machine\software\pki\authorities\<id> name
+canonical: Machine\Software\Pki\Authorities\<id> Name
+type: REG_SZ
+default: (required)
+valid: non-empty text
+applies: immediately
+
+The CA's display name.
+
+--- machine\software\pki\authorities\<id> certificate
+canonical: Machine\Software\Pki\Authorities\<id> Certificate
+type: REG_BINARY
+default: (required)
+valid: a DER X.509 CA certificate whose key is the CA's key
+applies: immediately
+
+The CA's own certificate.
+
+--- machine\software\pki\authorities\<id> key
+canonical: Machine\Software\Pki\Authorities\<id> Key
+type: REG_SZ
+default: (required)
+valid: service:<name> or file:<absolute path>
+applies: immediately
+
+Where the CA's private key is kept. service:<name> is a key in pkid's own
+store, which only pkid can read, for a CA that issues unattended.
+file:<path> is a passphrase-sealed key file, such as a root's on removable
+media: pkid can sign with it only while an administrator has unlocked it.
+
+--- machine\software\pki\authorities\<id> casecurity
+canonical: Machine\Software\Pki\Authorities\<id> CaSecurity
+type: REG_BINARY
+default: O:SYG:SYD:(A;;0x2;;;AU)(A;;0xf;;;BA)(A;;0xf;;;SY)
+valid: a self-relative security descriptor
+applies: new requests
+
+Who may do what at this CA. Read (0x1) sees every request and certificate;
+requesters always see their own. Request (0x2) submits requests. Issue and
+Manage Certificates (0x4) approves and denies held requests and revokes
+certificates; nobody approves their own request. Manage CA (0x8) changes
+the CA and its key.
+
+Submitting needs Request here, enrolment on the template and a request
+right on every name.
+
+--- machine\software\pki\authorities\<id> templates
+canonical: Machine\Software\Pki\Authorities\<id> Templates
+type: REG_MULTI_SZ
+default: none
+valid: GUIDs of keys under Templates
+applies: new requests
+
+The templates this CA issues from. A CA issues from no template it doesn't
+list.
+
+--- machine\software\pki\authorities\<id> crldistributionpoints
+canonical: Machine\Software\Pki\Authorities\<id> CrlDistributionPoints
+type: REG_MULTI_SZ
+default: none
+valid: URLs
+applies: new certificates
+
+Where certificates from this CA say its revocation list is published. Use a
+host name that will outlive this machine.

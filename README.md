@@ -22,6 +22,13 @@ Registry configuration is described in [pkid.regman](docs/pkid.regman).
 All cryptography goes through `peios-crypto`, from peios-rs: keys, signing,
 randomness and checking the signatures on certificate requests.
 
+`pkid` is the service. It reads its configuration from the Registry, keeps
+online CA keys in `/var/state/pki/keys`, readable by its service identity
+alone, records everything in `/var/state/pki/pkid.db`, and serves requests on
+its control socket, authorizing each against the caller's token. Its events
+are described in [pkid.evman](docs/pkid.evman). An administrator provisions
+its state directories and default configuration (`pkid::provision`).
+
 `pkid-core` is pkid's control wire, a PSPU §3.15 channel at
 `/run/pkid/pki.sock`, and `pkid-client` is the client the `pki` command and
 window use. They link libpeios.
@@ -29,11 +36,14 @@ window use. They link libpeios.
 ## Build and test
 
 ```sh
-pekit test -j 2 unit policy keys store pipeline wire client clippy doctests
+pekit test -j 2 unit policy keys store pipeline wire client daemon clippy doctests
+pekit build -j 2 pkid
 ```
 
-`wire` and `client` test the crates that link libpeios, which pekit builds
-from the SDK at the commit `pekit.lock` pins. Cargo builds only the portable
+`wire`, `client` and `daemon` test the crates that link libpeios, which pekit
+builds from the SDK at the commit `pekit.lock` pins. They run on any Linux
+host; what needs a Peios kernel, the access checks, the socket's identity
+and the key store's descriptors, is qualified in a Peios guest. Cargo builds only the portable
 crates, the workspace's default members:
 
 ```sh
