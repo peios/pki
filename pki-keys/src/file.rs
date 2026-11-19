@@ -111,6 +111,11 @@ impl KeyProvider for KeyFileProvider {
         let key = self.read(key)?.open(passphrase)?;
         KeyFile::seal(&key, seal_under)
     }
+
+    fn delete(&self, key: &KeyReference) -> Result<(), KeyError> {
+        let path = self.path(key)?;
+        fs::remove_file(path).map_err(|error| KeyError::storage(&error, &key.to_string()))
+    }
 }
 
 /// Writes `bytes` to a new file at `path`, readable only by its owner, and

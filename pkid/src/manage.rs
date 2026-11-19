@@ -309,21 +309,75 @@ fn record(
     values
 }
 
+/// A key made for a CA that isn't recorded yet. It is destroyed unless the
+/// CA's record is written, so a failed creation leaves behind no key that
+/// nothing refers to, and that, if it isn't exportable, nobody could reach.
+struct Provisional<'a> {
+    provider: &'a dyn KeyProvider,
+    key: Option<KeyReference>,
+}
+
+impl<'a> Provisional<'a> {
+    fn new(provider: &'a dyn KeyProvider, key: KeyReference) -> Self {
+        Self {
+            provider,
+            key: Some(key),
+        }
+    }
+
+    fn key(&self) -> &KeyReference {
+        self.key
+            .as_ref()
+            .expect("a provisional key is held until kept")
+    }
+
+    /// The CA's record refers to the key now: keep it.
+    fn keep(mut self) {
+        self.key = None;
+    }
+}
+
+impl Drop for Provisional<'_> {
+    fn drop(&mut self) {
+        if let Some(key) = self.key.take() {
+            if let Err(error) = self.provider.delete(&key) {
+                eprintln!("pkid: can't remove {key}, made for a CA that wasn't created: {error}");
+            }
+        }
+    }
+}
+
+/// A change to one CA's record.
+struct Change<'a> {
+    id: &'a str,
+    values: Values,
+    remove: &'a [&'a str],
+    action: &'static str,
+}
+
 /// Writes a CA's record and takes up the configuration it makes, replying
-/// with the CA as it now stands.
+/// with the CA as it now stands. A `provisional` key is kept once the
+/// record that refers to it is written.
 fn commit(
     state: &mut State,
     services: &Services<'_>,
-    id: &str,
-    values: &Values,
-    remove: &[&str],
-    action: &'static str,
     caller: &dyn Principal,
+    change: Change<'_>,
+    provisional: Option<Provisional<'_>>,
 ) -> Result<Reply, WireError> {
+    let Change {
+        id,
+        values,
+        remove,
+        action,
+    } = change;
     services
         .configurator
-        .write_authority(id, values, remove)
+        .write_authority(id, &values, remove)
         .map_err(internal)?;
+    if let Some(provisional) = provisional {
+        provisional.keep();
+    }
     crate::dispatch::apply(state, services.configurator.read(), services);
     services.audit.record(Event::Managed {
         ca: id.to_string(),
@@ -389,9 +443,10 @@ pub fn handle(
                 .provider
                 .generate(&place.locator, algorithm, &place.options())
                 .map_err(key_error)?;
+            let provisional = Provisional::new(place.provider, reference);
             let signer = place
                 .provider
-                .open(&reference, place.opening())
+                .open(provisional.key(), place.opening())
                 .map_err(key_error)?;
 
             let (certificate, request) = match (&issuer, parent) {
@@ -446,13 +501,19 @@ pub fn handle(
             };
             let values = record(
                 &name,
-                &reference,
+                provisional.key(),
                 certificate.as_deref(),
                 request.as_deref(),
                 &templates,
                 &crl_distribution_points,
             );
-            commit(state, services, &id, &values, &[], "created", caller)
+            let change = Change {
+                id: &id,
+                values,
+                remove: &[],
+                action: "created",
+            };
+            commit(state, services, caller, change, Some(provisional))
         }
 
         Request::SignSubordinate {
@@ -529,15 +590,13 @@ pub fn handle(
                 &config.templates,
                 &config.crl_distribution_points,
             );
-            commit(
-                state,
-                services,
-                &ca,
-                &values,
-                &["Request"],
-                "installed",
-                caller,
-            )
+            let change = Change {
+                id: &ca,
+                values,
+                remove: &["Request"],
+                action: "installed",
+            };
+            commit(state, services, caller, change, None)
         }
 
         Request::ImportAuthority {
@@ -562,15 +621,22 @@ pub fn handle(
                 .provider
                 .import(&place.locator, &private, &place.options())
                 .map_err(key_error)?;
+            let provisional = Provisional::new(place.provider, reference);
             let values = record(
                 &name,
-                &reference,
+                provisional.key(),
                 Some(&certificate),
                 None,
                 &templates,
                 &crl_distribution_points,
             );
-            commit(state, services, &id, &values, &[], "imported", caller)
+            let change = Change {
+                id: &id,
+                values,
+                remove: &[],
+                action: "imported",
+            };
+            commit(state, services, caller, change, Some(provisional))
         }
 
         Request::ExportKey {
@@ -617,7 +683,13 @@ pub fn handle(
                     .as_deref()
                     .unwrap_or(&config.crl_distribution_points),
             );
-            commit(state, services, &ca, &values, &[], "configured", caller)
+            let change = Change {
+                id: &ca,
+                values,
+                remove: &[],
+                action: "configured",
+            };
+            commit(state, services, caller, change, None)
         }
 
         _ => unreachable!("routed by dispatch::handle"),

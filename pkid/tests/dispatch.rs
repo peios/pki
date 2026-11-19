@@ -2,7 +2,7 @@
 //! checks, an in-memory Registry and in-memory key storage in place of the
 //! kernel.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::io;
 use std::path::PathBuf;
@@ -134,11 +134,14 @@ impl Audit for Recorder {
     }
 }
 
-/// The Registry, in memory.
-struct Registry(RefCell<Snapshot>);
+/// The Registry, in memory. Writes fail while `failing` is set.
+struct Registry(RefCell<Snapshot>, Cell<bool>);
 
 impl Configurator for Registry {
     fn write_authority(&self, id: &str, values: &Values, remove: &[&str]) -> Result<(), String> {
+        if self.1.get() {
+            return Err("the Registry refused the write".into());
+        }
         let mut snapshot = self.0.borrow_mut();
         let index = match snapshot.authorities.iter().position(|(key, _)| key == id) {
             Some(index) => index,
@@ -185,6 +188,13 @@ impl KeyStore for MemoryStore {
         let keys = self.0.lock().unwrap();
         let contents = keys.get(name).ok_or(io::ErrorKind::NotFound)?;
         Ok(Secret::from(contents.as_slice()))
+    }
+
+    fn delete(&self, name: &str) -> io::Result<()> {
+        let mut keys = self.0.lock().unwrap();
+        keys.remove(name)
+            .map(|_| ())
+            .ok_or(io::ErrorKind::NotFound.into())
     }
 }
 
@@ -266,6 +276,7 @@ struct World {
     state: State,
     registry: Registry,
     providers: KeyProviders,
+    keys: MemoryStore,
     audit: Recorder,
     defaults: Defaults,
 }
@@ -273,7 +284,7 @@ struct World {
 impl World {
     fn new() -> Self {
         let keys = MemoryStore::default();
-        let service = ServiceKeyProvider::new(keys);
+        let service = ServiceKeyProvider::new(keys.clone());
         let key = PrivateKey::generate(KeyAlgorithm::EcdsaP256).unwrap();
         service
             .import(
@@ -295,8 +306,12 @@ impl World {
                 keys: HashMap::new(),
                 source: None,
             },
-            registry: Registry(RefCell::new(snapshot(&ca_certificate(&key)))),
+            registry: Registry(
+                RefCell::new(snapshot(&ca_certificate(&key))),
+                Cell::new(false),
+            ),
             providers,
+            keys,
             audit: Recorder::default(),
             defaults: defaults(),
         };
@@ -785,6 +800,58 @@ fn file_keys_sign_only_with_their_passphrase() {
     );
     let issuing = authority(world.call(unlocked(Some(PASSPHRASE)), &admin));
     assert!(issuing.certificate.is_some());
+}
+
+#[test]
+fn a_failed_creation_leaves_no_key_behind() {
+    let mut world = World::new();
+    let admin = Person::admin(ALEX);
+    world.registry.1.set(true);
+    let mut key = service_key("ecdsa-p256");
+    key.exportable = false;
+    let request = create("Doomed CA", key, Issuer::SelfSigned, None);
+    assert_eq!(world.code(request, &admin), ErrorCode::Internal);
+    let stored: Vec<String> = world.keys.0.lock().unwrap().keys().cloned().collect();
+    assert_eq!(stored, vec!["issuing".to_string()]);
+
+    let path = directory("doomed-root").join("root.key");
+    let request = create(
+        "Doomed Root",
+        KeySpec {
+            provider: "file".into(),
+            locator: Some(path.to_str().unwrap().into()),
+            algorithm: Some("ecdsa-p256".into()),
+            exportable: true,
+            passphrase: Some(Passphrase::new(PASSPHRASE.as_bytes().to_vec())),
+        },
+        Issuer::SelfSigned,
+        None,
+    );
+    assert_eq!(world.code(request, &admin), ErrorCode::Internal);
+    assert!(!path.exists());
+}
+
+#[test]
+fn key_files_cant_be_made_non_exportable() {
+    let mut world = World::new();
+    let path = directory("non-exportable-root").join("root.key");
+    let request = create(
+        "Root",
+        KeySpec {
+            provider: "file".into(),
+            locator: Some(path.to_str().unwrap().into()),
+            algorithm: Some("ecdsa-p256".into()),
+            exportable: false,
+            passphrase: Some(Passphrase::new(PASSPHRASE.as_bytes().to_vec())),
+        },
+        Issuer::SelfSigned,
+        None,
+    );
+    assert_eq!(
+        world.code(request, &Person::admin(ALEX)),
+        ErrorCode::BadRequest
+    );
+    assert!(!path.exists());
 }
 
 #[test]

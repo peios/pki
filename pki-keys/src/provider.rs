@@ -75,6 +75,11 @@ pub trait KeyProvider: Send + Sync {
         passphrase: Option<&Passphrase>,
         seal_under: &NewPassphrase,
     ) -> Result<Vec<u8>, KeyError>;
+
+    /// Destroys a stored key, such as one made for a CA whose creation then
+    /// failed. The CA service decides who may; a destroyed key can't be
+    /// recovered except from an export.
+    fn delete(&self, key: &KeyReference) -> Result<(), KeyError>;
 }
 
 /// Refuses an algorithm `provider` does not hold.

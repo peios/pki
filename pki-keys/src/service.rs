@@ -22,6 +22,9 @@ pub trait KeyStore: Send + Sync {
 
     /// Reads the key stored as `name`.
     fn read(&self, name: &str) -> io::Result<Secret>;
+
+    /// Removes the key stored as `name`.
+    fn delete(&self, name: &str) -> io::Result<()>;
 }
 
 /// Keeps keys in a [`KeyStore`], protected by its access control rather
@@ -130,5 +133,12 @@ impl<S: KeyStore> KeyProvider for ServiceKeyProvider<S> {
             return Err(KeyError::NotExportable);
         }
         KeyFile::seal(&file.open(None)?, seal_under)
+    }
+
+    fn delete(&self, key: &KeyReference) -> Result<(), KeyError> {
+        let name = self.name_of(key)?;
+        self.store
+            .delete(name)
+            .map_err(|error| KeyError::storage(&error, &key.to_string()))
     }
 }

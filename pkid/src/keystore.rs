@@ -64,4 +64,8 @@ impl KeyStore for ServiceKeyFiles {
     fn read(&self, name: &str) -> io::Result<Secret> {
         std::fs::read(self.path(name)).map(Secret::new)
     }
+
+    fn delete(&self, name: &str) -> io::Result<()> {
+        std::fs::remove_file(self.path(name))
+    }
 }

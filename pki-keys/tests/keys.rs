@@ -36,6 +36,13 @@ impl KeyStore for MemoryStore {
         let contents = keys.get(name).ok_or(io::ErrorKind::NotFound)?;
         Ok(Secret::from(contents.as_slice()))
     }
+
+    fn delete(&self, name: &str) -> io::Result<()> {
+        let mut keys = self.0.lock().unwrap();
+        keys.remove(name)
+            .map(|_| ())
+            .ok_or(io::ErrorKind::NotFound.into())
+    }
 }
 
 impl MemoryStore {
@@ -140,6 +147,33 @@ fn key_files_are_readable_only_by_their_owner() {
         .unwrap();
     let mode = std::fs::metadata(&path).unwrap().permissions().mode();
     assert_eq!(mode & 0o777, 0o600);
+}
+
+#[test]
+fn deleted_keys_are_gone() {
+    let store = MemoryStore::default();
+    let service = ServiceKeyProvider::new(store.clone());
+    let reference = service
+        .generate("issuing", KeyAlgorithm::EcdsaP256, &SERVICE_NOT_EXPORTABLE)
+        .unwrap();
+    service.delete(&reference).unwrap();
+    assert!(matches!(
+        service.open(&reference, None),
+        Err(KeyError::Unavailable(_))
+    ));
+
+    let files = KeyFileProvider::new();
+    let path = directory("deleted").join("root.key");
+    let passphrase = new_passphrase(PASSPHRASE);
+    let reference = files
+        .generate(
+            path.to_str().unwrap(),
+            KeyAlgorithm::EcdsaP256,
+            &sealed(&passphrase),
+        )
+        .unwrap();
+    files.delete(&reference).unwrap();
+    assert!(!path.exists());
 }
 
 #[test]
