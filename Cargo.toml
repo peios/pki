@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pki-core", "pki-keys", "pki-policy", "pki-store"]
+members = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 
 [workspace.package]
 version = "0.1.0"
