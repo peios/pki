@@ -40,6 +40,15 @@ pub struct Publication {
     warned: HashMap<String, OffsetDateTime>,
 }
 
+impl Publication {
+    /// Forgets what was published, so that every current CRL is published
+    /// again: after a configuration change, which can move a CA's
+    /// distribution points.
+    pub fn forget_published(&mut self) {
+        self.published.clear();
+    }
+}
+
 /// The URL path of an `http` distribution point, as a relative file path,
 /// or nothing for one this publisher can't serve.
 pub fn http_path(url: &str) -> Option<PathBuf> {

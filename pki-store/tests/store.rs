@@ -516,6 +516,10 @@ fn revocations_after_a_crl_are_noticed() {
         )
         .unwrap();
     assert!(store.revoked_since(CA, crl_time).unwrap());
+    // A CRL signed in the second of the revocation lists it.
+    assert!(!store
+        .revoked_since(CA, datetime!(2027-03-01 0:00 UTC))
+        .unwrap());
     assert!(!store
         .revoked_since(CA, datetime!(2027-04-01 0:00 UTC))
         .unwrap());

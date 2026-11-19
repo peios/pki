@@ -1147,6 +1147,51 @@ fn a_revocation_is_published_at_once() {
 }
 
 #[test]
+fn a_revocation_brings_one_crl_not_two() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    let serial = issue_to_radius(&mut world);
+    world
+        .call(
+            Request::Revoke {
+                ca: "issuing".into(),
+                serial,
+                reason: 1,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    // The schedule's next round finds nothing newer than the CRL the
+    // revocation brought.
+    world.maintain(NOW + time::Duration::minutes(1));
+    assert_eq!(crl_numbers(&world), [1, 2]);
+}
+
+#[test]
+fn a_new_distribution_point_is_published_without_a_new_crl() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    assert_eq!(world.published().len(), 1);
+    world
+        .call(
+            Request::ConfigureAuthority {
+                ca: "issuing".into(),
+                templates: None,
+                crl_distribution_points: Some(vec!["http://pki.home/new/issuing.crl".into()]),
+                crl_lifetime_days: None,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    world.maintain(NOW + time::Duration::minutes(1));
+    // The same CRL, handed to the publishers again for the new address.
+    assert_eq!(crl_numbers(&world), [1]);
+    let published = world.published();
+    assert_eq!(published.len(), 2);
+    assert_eq!(published[0].1, published[1].1);
+}
+
+#[test]
 fn officers_publish_a_crl_on_request() {
     let mut world = World::new();
     let publish = || Request::PublishCrl {

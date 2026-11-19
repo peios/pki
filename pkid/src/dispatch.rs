@@ -145,6 +145,9 @@ pub fn apply(state: &mut State, source: Source, services: &Services<'_>) {
     };
     state.loaded = loaded;
     state.source = Some(source);
+    // A CA's distribution points may have changed: publish every current
+    // CRL again, to wherever its CA now says, on the next round.
+    state.publication.forget_published();
 }
 
 /// Opens the keys of `loaded`'s CAs that need no passphrase, keeping those

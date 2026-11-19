@@ -499,13 +499,15 @@ impl Store {
         Ok(())
     }
 
-    /// Whether the CA has revoked a certificate at or after `since`, which
-    /// a CRL signed then might not list.
+    /// Whether the CA has revoked a certificate after `since`, which a CRL
+    /// signed then doesn't list. A revocation in the same second counts as
+    /// listed: pkid signs a CRL straight after each revocation, in that
+    /// second, and the half-life renewal catches any it missed.
     pub fn revoked_since(&self, ca: &str, since: OffsetDateTime) -> Result<bool, StoreError> {
         Ok(self
             .connection
             .query_row(
-                "SELECT 1 FROM revocations WHERE ca = ?1 AND revoked >= ?2 LIMIT 1",
+                "SELECT 1 FROM revocations WHERE ca = ?1 AND revoked > ?2 LIMIT 1",
                 params![ca, since.unix_timestamp()],
                 |_| Ok(()),
             )
