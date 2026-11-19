@@ -6,15 +6,17 @@ license.workspace = true
 publish.workspace = true
 
 [dependencies]
+peios-crypto.workspace = true
 pem.workspace = true
 rcgen.workspace = true
-ring.workspace = true
 time.workspace = true
 x509-parser.workspace = true
 yasna.workspace = true
-zeroize.workspace = true
 
 [dev-dependencies]
+# Tests make requests with rcgen's own keys; pki-core itself signs only
+# through peios-crypto.
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
 rustls-pki-types.workspace = true
 rustls-webpki.workspace = true
 time = { workspace = true, features = ["macros"] }

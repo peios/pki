@@ -1,19 +1,44 @@
 //! Behaviour of issued chains, checked with an independent verifier.
 
+use peios_crypto::{KeyAlgorithm, PrivateKey, PublicKey, SignatureScheme, Signer};
 use pki_core::{
     create_root, AltName, CaProfile, CaSubject, Certificate, CertificateRequest, CommonName,
-    CrlProfile, DisplayName, DnsName, EcdsaCurve, Error, ExtendedKeyUsage, ExtendedKeyUsages,
-    IssuingCa, KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree, RevocationReason,
-    RevokedCertificate, SerialNumber, Sid, Signer, SoftwareKey, SubjectPublicKey, UsageOid,
-    Validity,
+    CrlProfile, DisplayName, DnsName, Error, ExtendedKeyUsage, ExtendedKeyUsages, IssuingCa,
+    KeyUsage, LeafProfile, LeafSubject, NameConstraints, NameSubtree, RevocationReason,
+    RevokedCertificate, SerialNumber, Sid, SubjectPublicKey, UsageOid, Validity,
 };
 use rustls_pki_types::{CertificateDer, ServerName, UnixTime};
 use time::macros::datetime;
 use time::OffsetDateTime;
 use x509_parser::prelude::{FromDer, X509Certificate};
 
-/// A fixed RSA-3072 key for tests only; `ring` cannot generate RSA keys.
-const RSA_TEST_KEY: &[u8] = include_bytes!("data/rsa-3072-test-key.pk8");
+/// A software key, with its public key as pki-core reads a request's.
+struct TestKey {
+    key: PrivateKey,
+    subject: SubjectPublicKey,
+}
+
+impl TestKey {
+    fn generate(algorithm: KeyAlgorithm) -> Self {
+        let key = PrivateKey::generate(algorithm).unwrap();
+        let subject = SubjectPublicKey::from_der(key.public_key().spki()).unwrap();
+        Self { key, subject }
+    }
+
+    fn subject(&self) -> &SubjectPublicKey {
+        &self.subject
+    }
+}
+
+impl Signer for TestKey {
+    fn public_key(&self) -> &PublicKey {
+        self.key.public_key()
+    }
+
+    fn sign(&self, scheme: SignatureScheme, message: &[u8]) -> peios_crypto::Result<Vec<u8>> {
+        self.key.sign(scheme, message)
+    }
+}
 
 /// Verification happens at a fixed time inside every test validity period.
 const VERIFY_AT: OffsetDateTime = datetime!(2027-06-01 0:00 UTC);
@@ -68,19 +93,19 @@ fn serial() -> SerialNumber {
 
 /// A two-tier hierarchy: a root and an issuing CA below it.
 struct Hierarchy {
-    root_key: SoftwareKey,
+    root_key: TestKey,
     root: Certificate,
-    issuing_key: SoftwareKey,
+    issuing_key: TestKey,
     issuing: Certificate,
 }
 
 impl Hierarchy {
-    fn new(root_key: SoftwareKey, issuing_profile: CaProfile) -> Self {
+    fn new(root_key: TestKey, issuing_profile: CaProfile) -> Self {
         let root = create_root(&root_key, &ca_profile("Test Root", Some(1)), &serial()).unwrap();
-        let issuing_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P256).unwrap();
+        let issuing_key = TestKey::generate(KeyAlgorithm::EcdsaP256);
         let issuing = IssuingCa::new(root.der(), &root_key)
             .unwrap()
-            .issue_ca(issuing_key.public_key(), &issuing_profile, &serial())
+            .issue_ca(issuing_key.subject(), &issuing_profile, &serial())
             .unwrap();
         Self {
             root_key,
@@ -91,7 +116,7 @@ impl Hierarchy {
     }
 
     fn ecdsa() -> Self {
-        let root_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+        let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
         Self::new(root_key, ca_profile("Test Issuing CA", Some(0)))
     }
 
@@ -120,8 +145,8 @@ impl Hierarchy {
     }
 }
 
-fn leaf_key() -> SoftwareKey {
-    SoftwareKey::generate_ecdsa(EcdsaCurve::P256).unwrap()
+fn leaf_key() -> TestKey {
+    TestKey::generate(KeyAlgorithm::EcdsaP256)
 }
 
 #[test]
@@ -130,11 +155,7 @@ fn two_tier_server_certificate_verifies() {
     let key = leaf_key();
     let leaf = hierarchy
         .issuing_ca()
-        .issue(
-            key.public_key(),
-            &server_profile(&["radius.home"]),
-            &serial(),
-        )
+        .issue(key.subject(), &server_profile(&["radius.home"]), &serial())
         .unwrap();
     hierarchy.verify_server(&leaf, "radius.home").unwrap();
     assert!(hierarchy.verify_server(&leaf, "other.home").is_err());
@@ -142,16 +163,12 @@ fn two_tier_server_certificate_verifies() {
 
 #[test]
 fn rsa_root_with_ecdsa_issuing_ca_verifies() {
-    let root_key = SoftwareKey::from_pkcs8(RSA_TEST_KEY).unwrap();
+    let root_key = TestKey::generate(KeyAlgorithm::Rsa3072);
     let hierarchy = Hierarchy::new(root_key, ca_profile("Test Issuing CA", Some(0)));
     let key = leaf_key();
     let leaf = hierarchy
         .issuing_ca()
-        .issue(
-            key.public_key(),
-            &server_profile(&["radius.home"]),
-            &serial(),
-        )
+        .issue(key.subject(), &server_profile(&["radius.home"]), &serial())
         .unwrap();
     hierarchy.verify_server(&leaf, "radius.home").unwrap();
 }
@@ -159,14 +176,10 @@ fn rsa_root_with_ecdsa_issuing_ca_verifies() {
 #[test]
 fn rsa_subject_keys_are_certified() {
     let hierarchy = Hierarchy::ecdsa();
-    let key = SoftwareKey::from_pkcs8(RSA_TEST_KEY).unwrap();
+    let key = TestKey::generate(KeyAlgorithm::Rsa3072);
     let leaf = hierarchy
         .issuing_ca()
-        .issue(
-            key.public_key(),
-            &server_profile(&["printer.home"]),
-            &serial(),
-        )
+        .issue(key.subject(), &server_profile(&["printer.home"]), &serial())
         .unwrap();
     hierarchy.verify_server(&leaf, "printer.home").unwrap();
 }
@@ -178,7 +191,7 @@ fn common_name_must_be_one_of_the_names() {
     profile.subject.common_name = Some(CommonName::Name(dns("administrator.home")));
     let result = hierarchy
         .issuing_ca()
-        .issue(leaf_key().public_key(), &profile, &serial());
+        .issue(leaf_key().subject(), &profile, &serial());
     assert!(matches!(result, Err(Error::InvalidValue(_))), "{result:?}");
 }
 
@@ -196,7 +209,7 @@ fn display_name_becomes_the_common_name() {
     ));
     let leaf = hierarchy
         .issuing_ca()
-        .issue(leaf_key().public_key(), &profile, &serial())
+        .issue(leaf_key().subject(), &profile, &serial())
         .unwrap();
     let parsed = parse(&leaf);
     let common_name = parsed.subject().iter_common_name().next().unwrap();
@@ -219,7 +232,7 @@ fn certificate_without_names_is_refused() {
     profile.subject.common_name = None;
     let result = hierarchy
         .issuing_ca()
-        .issue(leaf_key().public_key(), &profile, &serial());
+        .issue(leaf_key().subject(), &profile, &serial());
     assert!(matches!(result, Err(Error::InvalidValue(_))), "{result:?}");
 }
 
@@ -240,7 +253,7 @@ fn certificate_outliving_its_issuer_is_refused() {
     );
     let result = hierarchy
         .issuing_ca()
-        .issue(leaf_key().public_key(), &profile, &serial());
+        .issue(leaf_key().subject(), &profile, &serial());
     assert!(
         matches!(result, Err(Error::ConstraintViolation(_))),
         "{result:?}"
@@ -254,19 +267,19 @@ fn path_length_limits_further_cas() {
     let below_zero =
         hierarchy
             .issuing_ca()
-            .issue_ca(key.public_key(), &ca_profile("Too Deep", None), &serial());
+            .issue_ca(key.subject(), &ca_profile("Too Deep", None), &serial());
     assert!(
         matches!(below_zero, Err(Error::ConstraintViolation(_))),
         "{below_zero:?}"
     );
 
     let root = IssuingCa::new(hierarchy.root.der(), &hierarchy.root_key).unwrap();
-    let unlimited = root.issue_ca(key.public_key(), &ca_profile("Unlimited", None), &serial());
+    let unlimited = root.issue_ca(key.subject(), &ca_profile("Unlimited", None), &serial());
     assert!(
         matches!(unlimited, Err(Error::ConstraintViolation(_))),
         "{unlimited:?}"
     );
-    let equal = root.issue_ca(key.public_key(), &ca_profile("Equal", Some(1)), &serial());
+    let equal = root.issue_ca(key.subject(), &ca_profile("Equal", Some(1)), &serial());
     assert!(
         matches!(equal, Err(Error::ConstraintViolation(_))),
         "{equal:?}"
@@ -275,22 +288,22 @@ fn path_length_limits_further_cas() {
 
 #[test]
 fn three_tier_hierarchy_verifies() {
-    let root_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+    let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
     let root = create_root(&root_key, &ca_profile("Root", Some(2)), &serial()).unwrap();
-    let policy_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+    let policy_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
     let policy = IssuingCa::new(root.der(), &root_key)
         .unwrap()
         .issue_ca(
-            policy_key.public_key(),
+            policy_key.subject(),
             &ca_profile("Policy", Some(1)),
             &serial(),
         )
         .unwrap();
-    let issuing_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P256).unwrap();
+    let issuing_key = TestKey::generate(KeyAlgorithm::EcdsaP256);
     let issuing = IssuingCa::new(policy.der(), &policy_key)
         .unwrap()
         .issue_ca(
-            issuing_key.public_key(),
+            issuing_key.subject(),
             &ca_profile("Issuing", Some(0)),
             &serial(),
         )
@@ -298,11 +311,7 @@ fn three_tier_hierarchy_verifies() {
     let key = leaf_key();
     let leaf = IssuingCa::new(issuing.der(), &issuing_key)
         .unwrap()
-        .issue(
-            key.public_key(),
-            &server_profile(&["radius.home"]),
-            &serial(),
-        )
+        .issue(key.subject(), &server_profile(&["radius.home"]), &serial())
         .unwrap();
 
     let root_der = CertificateDer::from(root.der());
@@ -335,14 +344,14 @@ fn name_constraints_bind_the_issuing_ca() {
         permitted: vec![NameSubtree::Dns(DnsName::new("lab.home").unwrap())],
         excluded: Vec::new(),
     });
-    let root_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+    let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
     let hierarchy = Hierarchy::new(root_key, profile);
     let key = leaf_key();
 
     let inside = hierarchy
         .issuing_ca()
         .issue(
-            key.public_key(),
+            key.subject(),
             &server_profile(&["printer.lab.home"]),
             &serial(),
         )
@@ -351,11 +360,10 @@ fn name_constraints_bind_the_issuing_ca() {
         .verify_server(&inside, "printer.lab.home")
         .unwrap();
 
-    let outside = hierarchy.issuing_ca().issue(
-        key.public_key(),
-        &server_profile(&["radius.home"]),
-        &serial(),
-    );
+    let outside =
+        hierarchy
+            .issuing_ca()
+            .issue(key.subject(), &server_profile(&["radius.home"]), &serial());
     assert!(
         matches!(outside, Err(Error::ConstraintViolation(_))),
         "{outside:?}"
@@ -367,13 +375,13 @@ fn usage_constrained_issuing_ca_refuses_other_usages() {
     let mut profile = ca_profile("Servers Only", Some(0));
     profile.extended_key_usages =
         Some(ExtendedKeyUsages::new(vec![ExtendedKeyUsage::ServerAuth]).unwrap());
-    let root_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+    let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
     let hierarchy = Hierarchy::new(root_key, profile);
     let mut leaf = server_profile(&["radius.home"]);
     leaf.extended_key_usages = ExtendedKeyUsages::new(vec![ExtendedKeyUsage::CodeSigning]).unwrap();
     let result = hierarchy
         .issuing_ca()
-        .issue(leaf_key().public_key(), &leaf, &serial());
+        .issue(leaf_key().subject(), &leaf, &serial());
     assert!(
         matches!(result, Err(Error::ConstraintViolation(_))),
         "{result:?}"
@@ -398,11 +406,7 @@ fn leaf_certificate_cannot_issue() {
     let key = leaf_key();
     let leaf = hierarchy
         .issuing_ca()
-        .issue(
-            key.public_key(),
-            &server_profile(&["radius.home"]),
-            &serial(),
-        )
+        .issue(key.subject(), &server_profile(&["radius.home"]), &serial())
         .unwrap();
     let result = IssuingCa::new(leaf.der(), &key);
     assert!(
@@ -424,7 +428,7 @@ fn owner_sid_is_embedded_when_present() {
     profile.owner_sid = Some(Sid::new("S-1-5-21-1-2-3-1001").unwrap());
     let with_sid = hierarchy
         .issuing_ca()
-        .issue(key.public_key(), &profile, &serial())
+        .issue(key.subject(), &profile, &serial())
         .unwrap();
     let extension = parse(&with_sid)
         .extensions()
@@ -438,7 +442,7 @@ fn owner_sid_is_embedded_when_present() {
     profile.owner_sid = None;
     let without = hierarchy
         .issuing_ca()
-        .issue(key.public_key(), &profile, &serial())
+        .issue(key.subject(), &profile, &serial())
         .unwrap();
     assert!(parse(&without)
         .extensions()
@@ -644,20 +648,26 @@ fn serial_numbers_round_trip_through_storage() {
 
 #[test]
 fn signer_failures_are_reported() {
-    struct FailingSigner(SoftwareKey);
+    struct FailingSigner(TestKey);
     impl Signer for FailingSigner {
-        fn public_key(&self) -> &SubjectPublicKey {
+        fn public_key(&self) -> &PublicKey {
             self.0.public_key()
         }
-        fn sign(&self, _: &[u8]) -> Result<Vec<u8>, Error> {
-            Err(Error::Signing("the key is offline".into()))
+        fn sign(&self, _: SignatureScheme, _: &[u8]) -> peios_crypto::Result<Vec<u8>> {
+            Err(peios_crypto::Error::PolicyRejected {
+                algorithm: "ecdsa-p256",
+                operation: "sign",
+            })
         }
     }
     let signer = FailingSigner(leaf_key());
     let result = create_root(&signer, &ca_profile("Offline", None), &serial());
     assert_eq!(
         result.unwrap_err(),
-        Error::Signing("the key is offline".into())
+        Error::Crypto(peios_crypto::Error::PolicyRejected {
+            algorithm: "ecdsa-p256",
+            operation: "sign",
+        })
     );
 }
 
@@ -671,7 +681,7 @@ fn ip_and_email_name_constraints_round_trip() {
         ],
         excluded: vec![NameSubtree::ip("10.9.0.0".parse().unwrap(), 16).unwrap()],
     });
-    let root_key = SoftwareKey::generate_ecdsa(EcdsaCurve::P384).unwrap();
+    let root_key = TestKey::generate(KeyAlgorithm::EcdsaP384);
     let hierarchy = Hierarchy::new(root_key, profile);
     let ca = hierarchy.issuing_ca();
     let key = leaf_key();
@@ -679,7 +689,7 @@ fn ip_and_email_name_constraints_round_trip() {
         let mut profile = server_profile(&["radius.home"]);
         profile.subject.common_name = None;
         profile.alt_names = vec![name];
-        ca.issue(key.public_key(), &profile, &serial())
+        ca.issue(key.subject(), &profile, &serial())
     };
 
     assert!(issue(AltName::Ip("10.1.2.3".parse().unwrap())).is_ok());

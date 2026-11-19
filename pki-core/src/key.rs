@@ -1,16 +1,12 @@
-//! Key algorithms, subject public keys, signers and in-memory software keys.
+//! Key algorithms, subject public keys and the adapter that lets a
+//! peios-crypto [`Signer`] sign through rcgen.
 
 use std::cell::RefCell;
 
-use ring::rand::SystemRandom;
-use ring::signature::{
-    EcdsaKeyPair, KeyPair, RsaKeyPair, ECDSA_P256_SHA256_ASN1_SIGNING,
-    ECDSA_P384_SHA384_ASN1_SIGNING, RSA_PKCS1_SHA256,
-};
+use peios_crypto::{SignatureScheme, Signer};
 use x509_parser::prelude::FromDer;
 use x509_parser::public_key::PublicKey;
 use x509_parser::x509::SubjectPublicKeyInfo;
-use zeroize::Zeroizing;
 
 use crate::Error;
 
@@ -69,6 +65,15 @@ impl KeyAlgorithm {
             Self::Ecdsa(EcdsaCurve::P256) => &rcgen::PKCS_ECDSA_P256_SHA256,
             Self::Ecdsa(EcdsaCurve::P384) => &rcgen::PKCS_ECDSA_P384_SHA384,
             Self::Rsa(_) => &rcgen::PKCS_RSA_SHA256,
+        }
+    }
+
+    /// The peios-crypto scheme matching [`Self::signature_algorithm`].
+    pub(crate) fn signature_scheme(self) -> SignatureScheme {
+        match self {
+            Self::Ecdsa(EcdsaCurve::P256) => SignatureScheme::EcdsaSha256,
+            Self::Ecdsa(EcdsaCurve::P384) => SignatureScheme::EcdsaSha384,
+            Self::Rsa(_) => SignatureScheme::RsaPkcs1Sha256,
         }
     }
 }
@@ -159,35 +164,24 @@ impl rcgen::PublicKeyData for SubjectPublicKey {
     }
 }
 
-/// Signs certificates and CRLs on behalf of a CA.
+/// Adapts a peios-crypto [`Signer`] to rcgen's signing interface.
 ///
-/// Key storage providers implement this. A signer may keep its private key
-/// anywhere, including hardware that never releases it.
-pub trait Signer {
-    /// The public half of the signing key.
-    fn public_key(&self) -> &SubjectPublicKey;
-
-    /// Signs `message` with the algorithm fixed by the key's
-    /// [`KeyAlgorithm`]. ECDSA signatures must be DER `Ecdsa-Sig-Value`
-    /// structures and RSA signatures PKCS #1 v1.5, as X.509 requires.
-    fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error>;
-}
-
-/// Adapts a [`Signer`] to rcgen's signing interface.
-///
-/// rcgen reports every signer failure as a bare `RemoteKeyError`, so the
-/// adapter keeps the signer's own error for [`RcgenSigner::error`].
+/// The CA key signs with the scheme its [`KeyAlgorithm`] fixes. rcgen
+/// reports every signer failure as a bare `RemoteKeyError`, so the adapter
+/// keeps the signer's own error for [`RcgenSigner::error`].
 pub(crate) struct RcgenSigner<'a> {
     signer: &'a dyn Signer,
+    public_key: SubjectPublicKey,
     failure: RefCell<Option<Error>>,
 }
 
 impl<'a> RcgenSigner<'a> {
-    pub(crate) fn new(signer: &'a dyn Signer) -> Self {
-        Self {
+    pub(crate) fn new(signer: &'a dyn Signer) -> Result<Self, Error> {
+        Ok(Self {
             signer,
+            public_key: SubjectPublicKey::from_der(signer.public_key().spki())?,
             failure: RefCell::new(None),
-        }
+        })
     }
 
     /// Translates an rcgen error, restoring the signer's error if signing
@@ -202,148 +196,20 @@ impl<'a> RcgenSigner<'a> {
 
 impl rcgen::PublicKeyData for RcgenSigner<'_> {
     fn der_bytes(&self) -> &[u8] {
-        rcgen::PublicKeyData::der_bytes(self.signer.public_key())
+        rcgen::PublicKeyData::der_bytes(&self.public_key)
     }
 
     fn algorithm(&self) -> &'static rcgen::SignatureAlgorithm {
-        rcgen::PublicKeyData::algorithm(self.signer.public_key())
+        rcgen::PublicKeyData::algorithm(&self.public_key)
     }
 }
 
 impl rcgen::SigningKey for RcgenSigner<'_> {
     fn sign(&self, message: &[u8]) -> Result<Vec<u8>, rcgen::Error> {
-        self.signer.sign(message).map_err(|error| {
-            *self.failure.borrow_mut() = Some(error);
+        let scheme = self.public_key.algorithm().signature_scheme();
+        self.signer.sign(scheme, message).map_err(|error| {
+            *self.failure.borrow_mut() = Some(Error::Crypto(error));
             rcgen::Error::RemoteKeyError
         })
     }
-}
-
-/// A private key held in process memory, loaded from or exported as PKCS #8.
-///
-/// Key storage providers that keep keys in software build on this type. The
-/// PKCS #8 bytes are wiped from memory when the key is dropped.
-pub struct SoftwareKey {
-    pkcs8: Zeroizing<Vec<u8>>,
-    pair: SoftwarePair,
-    public_key: SubjectPublicKey,
-    random: SystemRandom,
-}
-
-enum SoftwarePair {
-    Ecdsa(EcdsaKeyPair),
-    Rsa(RsaKeyPair),
-}
-
-impl SoftwareKey {
-    /// Generates a new ECDSA key.
-    ///
-    /// RSA generation is left to key storage providers, because `ring` can
-    /// only load RSA keys.
-    pub fn generate_ecdsa(curve: EcdsaCurve) -> Result<Self, Error> {
-        let random = SystemRandom::new();
-        let pkcs8 = EcdsaKeyPair::generate_pkcs8(ecdsa_signing(curve), &random)
-            .map_err(|_| Error::Signing("ECDSA key generation failed".into()))?;
-        Self::from_pkcs8(pkcs8.as_ref())
-    }
-
-    /// Loads an ECDSA P-256, ECDSA P-384 or RSA private key from PKCS #8 DER.
-    pub fn from_pkcs8(pkcs8: &[u8]) -> Result<Self, Error> {
-        let random = SystemRandom::new();
-        let pkcs8 = Zeroizing::new(pkcs8.to_vec());
-        for curve in [EcdsaCurve::P256, EcdsaCurve::P384] {
-            if let Ok(pair) = EcdsaKeyPair::from_pkcs8(ecdsa_signing(curve), &pkcs8, &random) {
-                let spki = ecdsa_spki(curve, pair.public_key().as_ref());
-                return Ok(Self {
-                    public_key: SubjectPublicKey::from_der(&spki)?,
-                    pkcs8,
-                    pair: SoftwarePair::Ecdsa(pair),
-                    random,
-                });
-            }
-        }
-        let pair = RsaKeyPair::from_pkcs8(&pkcs8).map_err(|error| {
-            Error::UnsupportedKey(format!("not an ECDSA P-256, P-384 or RSA key: {error}"))
-        })?;
-        let spki = rsa_spki(pair.public().as_ref());
-        Ok(Self {
-            public_key: SubjectPublicKey::from_der(&spki)?,
-            pkcs8,
-            pair: SoftwarePair::Rsa(pair),
-            random,
-        })
-    }
-
-    /// The private key as PKCS #8 DER.
-    pub fn pkcs8(&self) -> &[u8] {
-        &self.pkcs8
-    }
-}
-
-impl Signer for SoftwareKey {
-    fn public_key(&self) -> &SubjectPublicKey {
-        &self.public_key
-    }
-
-    fn sign(&self, message: &[u8]) -> Result<Vec<u8>, Error> {
-        match &self.pair {
-            SoftwarePair::Ecdsa(pair) => pair
-                .sign(&self.random, message)
-                .map(|signature| signature.as_ref().to_vec())
-                .map_err(|_| Error::Signing("ECDSA signing failed".into())),
-            SoftwarePair::Rsa(pair) => {
-                let mut signature = vec![0; pair.public().modulus_len()];
-                pair.sign(&RSA_PKCS1_SHA256, &self.random, message, &mut signature)
-                    .map_err(|_| Error::Signing("RSA signing failed".into()))?;
-                Ok(signature)
-            }
-        }
-    }
-}
-
-fn ecdsa_signing(curve: EcdsaCurve) -> &'static ring::signature::EcdsaSigningAlgorithm {
-    match curve {
-        EcdsaCurve::P256 => &ECDSA_P256_SHA256_ASN1_SIGNING,
-        EcdsaCurve::P384 => &ECDSA_P384_SHA384_ASN1_SIGNING,
-    }
-}
-
-fn ecdsa_spki(curve: EcdsaCurve, point: &[u8]) -> Vec<u8> {
-    let curve = match curve {
-        EcdsaCurve::P256 => OID_CURVE_P256,
-        EcdsaCurve::P384 => OID_CURVE_P384,
-    };
-    yasna::construct_der(|writer| {
-        writer.write_sequence(|writer| {
-            writer.next().write_sequence(|writer| {
-                writer
-                    .next()
-                    .write_oid(&yasna::models::ObjectIdentifier::from_slice(
-                        OID_EC_PUBLIC_KEY,
-                    ));
-                writer
-                    .next()
-                    .write_oid(&yasna::models::ObjectIdentifier::from_slice(curve));
-            });
-            writer.next().write_bitvec_bytes(point, point.len() * 8);
-        });
-    })
-}
-
-fn rsa_spki(rsa_public_key: &[u8]) -> Vec<u8> {
-    yasna::construct_der(|writer| {
-        writer.write_sequence(|writer| {
-            writer.next().write_sequence(|writer| {
-                writer
-                    .next()
-                    .write_oid(&yasna::models::ObjectIdentifier::from_slice(
-                        OID_RSA_ENCRYPTION,
-                    ));
-                writer.next().write_null();
-            });
-            writer
-                .next()
-                .write_bitvec_bytes(rsa_public_key, rsa_public_key.len() * 8);
-        });
-    })
 }

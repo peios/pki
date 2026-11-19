@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["pki-core", "pki-policy"]
+members = ["pki-core", "pki-keys", "pki-policy"]
 
 [workspace.package]
 version = "0.1.0"
@@ -9,19 +9,26 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
+# peios-crypto is the only cryptography provider; every crate below that
+# signs or verifies uses its aws-lc-rs backend.
+peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "f4b91fc83de25f46d9b3558185e50bd922c438ce" }
 pem = "4"
-rcgen = { version = "=0.14.10", default-features = false, features = ["crypto", "ring", "x509-parser"] }
-ring = "=0.17.14"
+rcgen = { version = "=0.14.10", default-features = false, features = ["x509-parser"] }
 rustls-pki-types = "1.4.1"
-rustls-webpki = { version = "0.103", default-features = false, features = ["std", "alloc", "ring"] }
+rustls-webpki = { version = "0.103", default-features = false, features = ["std", "alloc", "aws-lc-rs"] }
 time = { version = "0.3", default-features = false, features = ["std"] }
-x509-parser = { version = "0.18.1", features = ["verify"] }
+unicode-normalization = "0.1"
+x509-parser = { version = "0.18.1", features = ["verify-aws"] }
 yasna = "0.6"
-zeroize = "1.9"
 
 [profile.dev]
 debug = 0
 incremental = false
+
+# Passphrase sealing runs Argon2id with 64 MiB; unoptimised, each test seal
+# would take seconds.
+[profile.dev.package.argon2]
+opt-level = 3
 
 [profile.release]
 debug = 2

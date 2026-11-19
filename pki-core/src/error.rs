@@ -17,8 +17,9 @@ pub enum Error {
     InvalidIssuer(String),
     /// The result would violate a constraint of the issuing CA.
     ConstraintViolation(String),
-    /// The signer failed to produce a signature.
-    Signing(String),
+    /// A cryptographic operation failed, such as the signer producing a
+    /// signature or drawing randomness for a serial number.
+    Crypto(peios_crypto::Error),
     /// A certificate or CRL could not be encoded.
     Encoding(String),
 }
@@ -39,7 +40,7 @@ impl fmt::Display for Error {
             Self::ConstraintViolation(detail) => {
                 write!(formatter, "issuing CA constraint violated: {detail}")
             }
-            Self::Signing(detail) => write!(formatter, "signing failed: {detail}"),
+            Self::Crypto(error) => write!(formatter, "cryptography failed: {error}"),
             Self::Encoding(detail) => write!(formatter, "encoding failed: {detail}"),
         }
     }
