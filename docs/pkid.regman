@@ -201,6 +201,12 @@ O:SYG:SYD:(A;CI;0x1;;;PS)(A;CI;0x7;;;BA)(A;CI;0x7;;;SY): owners may request
 their own names, Administrators and SYSTEM may request any name, and nobody
 else may request anything.
 
+An explicit value replaces what this name would otherwise inherit; it is
+not merged with the descriptors above it. The pki tools include the
+inherited entries when they write one. A direct edit must do the same, or
+the entries above, such as the grants to Administrators, no longer apply
+to this name and the names below it.
+
 Granting Request to a broad group, such as Authenticated Users, lets every
 member obtain certificates for those names without approval. Prefer
 Request with approval for groups.
