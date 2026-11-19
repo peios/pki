@@ -9,9 +9,12 @@ license = "MIT"
 publish = false
 
 [workspace.dependencies]
-# peios-crypto is the only cryptography provider; every crate below that
-# signs or verifies uses its aws-lc-rs backend.
-peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "f4b91fc83de25f46d9b3558185e50bd922c438ce" }
+# peios-crypto is pki's only cryptography provider: pki uses rcgen and
+# x509-parser only to encode and parse. rcgen runs without a crypto backend.
+# x509-parser keeps verify-aws solely because rcgen's x509-parser feature
+# doesn't compile without a verify feature; pki never calls it. Tests enable
+# more where an independent implementation helps.
+peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "fcf9a9341dfcff28eece119dfaffcacf2b2abf62" }
 pem = "4"
 rcgen = { version = "=0.14.10", default-features = false, features = ["x509-parser"] }
 rustls-pki-types = "1.4.1"

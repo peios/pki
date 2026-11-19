@@ -3,7 +3,7 @@
 
 use std::cell::RefCell;
 
-use peios_crypto::{SignatureScheme, Signer};
+use peios_crypto::{SignatureScheme, Signer, VerifyingKey};
 use x509_parser::prelude::FromDer;
 use x509_parser::public_key::PublicKey;
 use x509_parser::x509::SubjectPublicKeyInfo;
@@ -16,9 +16,10 @@ const OID_CURVE_P256: &[u64] = &[1, 2, 840, 10045, 3, 1, 7];
 const OID_CURVE_P384: &[u64] = &[1, 3, 132, 0, 34];
 
 /// The smallest RSA modulus the CA accepts.
-pub const MIN_RSA_MODULUS_BITS: u32 = 2048;
-/// The largest RSA modulus the CA accepts; larger keys only cost verifiers time.
-pub const MAX_RSA_MODULUS_BITS: u32 = 16384;
+pub const MIN_RSA_MODULUS_BITS: u32 = peios_crypto::MIN_RSA_MODULUS_BITS as u32;
+/// The largest RSA modulus the CA accepts: the largest whose signatures
+/// peios-crypto verifies, since a request must prove possession of its key.
+pub const MAX_RSA_MODULUS_BITS: u32 = peios_crypto::MAX_RSA_MODULUS_BITS as u32;
 
 /// An elliptic curve for ECDSA keys.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -79,9 +80,12 @@ impl KeyAlgorithm {
 }
 
 /// A validated X.509 SubjectPublicKeyInfo with a supported algorithm.
+///
+/// The key is held in its canonical encoding, so a certificate always
+/// carries an EC point uncompressed, however the request encoded it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SubjectPublicKey {
-    spki_der: Vec<u8>,
+    key: VerifyingKey,
     key_bits: Vec<u8>,
     algorithm: KeyAlgorithm,
 }
@@ -98,9 +102,14 @@ impl SubjectPublicKey {
             ));
         }
         let algorithm = classify(&spki)?;
+        let key = VerifyingKey::from_spki(spki_der)
+            .map_err(|error| Error::UnsupportedKey(format!("unusable public key: {error}")))?;
+        let (_, canonical) = SubjectPublicKeyInfo::from_der(key.spki())
+            .map_err(|error| Error::UnsupportedKey(format!("unparseable public key: {error}")))?;
+        let key_bits = canonical.subject_public_key.data.to_vec();
         Ok(Self {
-            spki_der: spki_der.to_vec(),
-            key_bits: spki.subject_public_key.data.to_vec(),
+            key,
+            key_bits,
             algorithm,
         })
     }
@@ -109,9 +118,13 @@ impl SubjectPublicKey {
         self.algorithm
     }
 
-    /// The DER SubjectPublicKeyInfo.
+    /// The DER SubjectPublicKeyInfo, in its canonical encoding.
     pub fn der(&self) -> &[u8] {
-        &self.spki_der
+        self.key.spki()
+    }
+
+    pub(crate) fn verifying_key(&self) -> &VerifyingKey {
+        &self.key
     }
 }
 

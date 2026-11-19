@@ -368,7 +368,7 @@ dependencies = [
 [[package]]
 name = "peios-crypto"
 version = "0.1.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=f4b91fc83de25f46d9b3558185e50bd922c438ce#f4b91fc83de25f46d9b3558185e50bd922c438ce"
+source = "git+https://github.com/peios/peios-rs.git?rev=fcf9a9341dfcff28eece119dfaffcacf2b2abf62#fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
 dependencies = [
  "argon2",
  "aws-lc-rs",

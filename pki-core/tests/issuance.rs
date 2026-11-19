@@ -604,6 +604,67 @@ fn small_rsa_keys_are_refused() {
     );
 }
 
+/// Requests made by OpenSSL, whose private keys were discarded.
+macro_rules! request {
+    ($name:literal) => {
+        include_bytes!(concat!("data/requests/", $name, ".csr"))
+    };
+}
+
+#[test]
+fn requests_from_other_software_verify() {
+    // OpenSSL signs with SHA-256 whatever the curve.
+    for der in [
+        &request!("p384-sha256")[..],
+        request!("rsa-sha512"),
+        request!("rsa-pss-sha256"),
+        request!("rsa-8192-sha256"),
+    ] {
+        let request = CertificateRequest::from_der(der).unwrap();
+        assert_eq!(request.names(), &[dns("radius.home")]);
+    }
+}
+
+#[test]
+fn weak_or_unusual_request_signatures_are_refused() {
+    for der in [&request!("p256-sha1")[..], request!("rsa-pss-salt20")] {
+        let result = CertificateRequest::from_der(der);
+        assert!(
+            matches!(result, Err(Error::UnsupportedSignature(_))),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn rsa_keys_larger_than_verifiers_accept_are_refused() {
+    assert_eq!(pki_core::MAX_RSA_MODULUS_BITS, 8192);
+    let result = CertificateRequest::from_der(request!("rsa-9216-sha256"));
+    assert!(
+        matches!(result, Err(Error::UnsupportedKey(_))),
+        "{result:?}"
+    );
+}
+
+#[test]
+fn compressed_points_are_certified_uncompressed() {
+    let request = CertificateRequest::from_der(request!("p256-compressed")).unwrap();
+    let hierarchy = Hierarchy::ecdsa();
+    let leaf = hierarchy
+        .issuing_ca()
+        .issue(
+            request.subject_key(),
+            &server_profile(&["radius.home"]),
+            &serial(),
+        )
+        .unwrap();
+    let (_, certificate) = X509Certificate::from_der(leaf.der()).unwrap();
+    let point = &certificate.public_key().subject_public_key.data;
+    assert_eq!(point.len(), 65);
+    assert_eq!(point[0], 0x04);
+    hierarchy.verify_server(&leaf, "radius.home").unwrap();
+}
+
 #[test]
 fn crl_lists_revoked_serials_and_verifies() {
     let hierarchy = Hierarchy::ecdsa();

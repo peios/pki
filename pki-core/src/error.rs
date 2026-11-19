@@ -7,6 +7,8 @@ pub enum Error {
     MalformedRequest(String),
     /// A request's signature does not verify against its own public key.
     InvalidRequestSignature,
+    /// A request is signed with an algorithm the CA does not accept.
+    UnsupportedSignature(String),
     /// A request asks for a name of a type the CA does not issue.
     UnsupportedName(String),
     /// A key uses an algorithm or size the CA does not accept.
@@ -32,6 +34,9 @@ impl fmt::Display for Error {
             }
             Self::InvalidRequestSignature => {
                 formatter.write_str("the certificate request's signature does not verify")
+            }
+            Self::UnsupportedSignature(detail) => {
+                write!(formatter, "unsupported request signature: {detail}")
             }
             Self::UnsupportedName(detail) => write!(formatter, "unsupported name: {detail}"),
             Self::UnsupportedKey(detail) => write!(formatter, "unsupported key: {detail}"),

@@ -15,9 +15,8 @@ of them depends on the Registry, tokens or other Peios services; pkid
 supplies configuration, access checks and the access-controlled key store. The
 Registry configuration is described in [pkid.regman](docs/pkid.regman).
 
-Keys, signing and randomness go through `peios-crypto`, from peios-rs.
-Certificate request signatures are still checked by x509-parser until
-PEI-1729 moves them to `peios-crypto` too.
+All cryptography goes through `peios-crypto`, from peios-rs: keys, signing,
+randomness and checking the signatures on certificate requests.
 
 ## Build and test
 
