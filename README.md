@@ -6,13 +6,17 @@ command for administration.
 
 The design and its decisions are recorded in Acta under PEI-1701.
 
-`pki-core` is the portable core. It has no Registry, token or
-operating-system dependencies.
+`pki-core` is the portable certificate core: it builds certificates, CA
+certificates and CRLs from approved profiles. `pki-policy` decides whether a
+request is issued, from certificate templates and the name trees, and builds
+its profile. Neither has Registry, token or operating-system dependencies;
+pkid supplies configuration and access checks. The Registry configuration is
+described in [pkid.regman](docs/pkid.regman).
 
 ## Build and test
 
 ```sh
-pekit test -j 2 unit clippy doctests
+pekit test -j 2 unit policy clippy doctests
 ```
 
 The same checks run directly with Cargo:
