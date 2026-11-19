@@ -15,7 +15,7 @@ pub enum RegData {
 
 /// The values of one Registry key. Value names are case-insensitive.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct Values(BTreeMap<String, RegData>);
+pub struct Values(BTreeMap<String, (String, RegData)>);
 
 impl Values {
     pub fn new() -> Self {
@@ -23,14 +23,20 @@ impl Values {
     }
 
     pub fn insert(&mut self, name: &str, data: RegData) {
-        self.0.insert(name.to_ascii_lowercase(), data);
+        self.0
+            .insert(name.to_ascii_lowercase(), (name.to_owned(), data));
     }
 
-    pub(crate) fn get(&self, name: &str) -> Option<&RegData> {
-        self.0.get(&name.to_ascii_lowercase())
+    /// Every value, by the name it was inserted with.
+    pub fn iter(&self) -> impl Iterator<Item = (&str, &RegData)> {
+        self.0.values().map(|(name, data)| (name.as_str(), data))
     }
 
-    pub(crate) fn sz(&self, name: &str) -> Result<Option<&str>, PolicyError> {
+    pub fn get(&self, name: &str) -> Option<&RegData> {
+        self.0.get(&name.to_ascii_lowercase()).map(|(_, data)| data)
+    }
+
+    pub fn sz(&self, name: &str) -> Result<Option<&str>, PolicyError> {
         match self.get(name) {
             None => Ok(None),
             Some(RegData::Sz(text)) => Ok(Some(text)),
@@ -38,11 +44,12 @@ impl Values {
         }
     }
 
-    pub(crate) fn required_sz(&self, name: &str) -> Result<&str, PolicyError> {
+    pub fn required_sz(&self, name: &str) -> Result<&str, PolicyError> {
         self.sz(name)?.ok_or_else(|| missing(name))
     }
 
-    pub(crate) fn multi_sz(&self, name: &str) -> Result<&[String], PolicyError> {
+    /// A REG_MULTI_SZ value, which must be present.
+    pub fn multi_sz(&self, name: &str) -> Result<&[String], PolicyError> {
         match self.get(name) {
             None => Err(missing(name)),
             Some(RegData::MultiSz(items)) => Ok(items),
@@ -50,7 +57,7 @@ impl Values {
         }
     }
 
-    pub(crate) fn dword(&self, name: &str) -> Result<Option<u32>, PolicyError> {
+    pub fn dword(&self, name: &str) -> Result<Option<u32>, PolicyError> {
         match self.get(name) {
             None => Ok(None),
             Some(RegData::Dword(value)) => Ok(Some(*value)),
@@ -58,11 +65,12 @@ impl Values {
         }
     }
 
-    pub(crate) fn required_dword(&self, name: &str) -> Result<u32, PolicyError> {
+    pub fn required_dword(&self, name: &str) -> Result<u32, PolicyError> {
         self.dword(name)?.ok_or_else(|| missing(name))
     }
 
-    pub(crate) fn binary(&self, name: &str) -> Result<Option<&[u8]>, PolicyError> {
+    /// A REG_BINARY value, which must not be empty when present.
+    pub fn binary(&self, name: &str) -> Result<Option<&[u8]>, PolicyError> {
         match self.get(name) {
             None => Ok(None),
             Some(RegData::Binary(bytes)) if !bytes.is_empty() => Ok(Some(bytes)),
