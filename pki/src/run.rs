@@ -11,6 +11,7 @@ use crate::cli::{self, Ca, Command};
 use crate::failure::{Failure, Kind};
 use crate::files::{self, Reserved};
 use crate::host::Host;
+use crate::issue;
 use crate::secret;
 use crate::show::{self, Output};
 
@@ -18,6 +19,8 @@ pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
     match command {
         Command::Setup => setup(host),
         Command::Ca(command) => ca(host, command),
+        Command::Request(command) => issue::request(host, command),
+        Command::Cert(command) => issue::cert(host, command),
         Command::Help { .. } => unreachable!("main prints help"),
     }
 }
@@ -52,12 +55,12 @@ fn setup(host: &dyn Host) -> Result<Output, Failure> {
 }
 
 /// Sends `request`, naming `what` in any failure.
-fn call(host: &dyn Host, request: &Request, what: &str) -> Result<Reply, Failure> {
+pub fn call(host: &dyn Host, request: &Request, what: &str) -> Result<Reply, Failure> {
     host.call(request)
         .map_err(|error| Failure::client(error).context(what))
 }
 
-fn unexpected(reply: &Reply, what: &str) -> Failure {
+pub fn unexpected(reply: &Reply, what: &str) -> Failure {
     Failure::failed(format!("pkid sent an unexpected reply: {reply:?}")).context(what)
 }
 
@@ -76,7 +79,7 @@ fn authorities(host: &dyn Host) -> Result<Vec<AuthorityInfo>, Failure> {
 }
 
 /// The CA `text` names: its ID, or a name no other CA has.
-fn resolve_ca(host: &dyn Host, text: &str) -> Result<AuthorityInfo, Failure> {
+pub fn resolve_ca(host: &dyn Host, text: &str) -> Result<AuthorityInfo, Failure> {
     let all = authorities(host)?;
     if let Some(authority) = all.iter().find(|a| a.id.eq_ignore_ascii_case(text)) {
         return Ok(authority.clone());

@@ -605,3 +605,209 @@ fn listing_shows_each_ca() {
     assert_eq!(output.text.lines().count(), 5);
     assert_eq!(output.json["authorities"].as_array().unwrap().len(), 4);
 }
+
+// Requests and certificates.
+
+fn submission(outcome: pkid_core::Outcome, reasons: &[&str]) -> Reply {
+    Reply::Submission(pkid_core::SubmissionInfo {
+        request: 42,
+        outcome,
+        reasons: reasons.iter().map(|r| r.to_string()).collect(),
+    })
+}
+
+fn request_file() -> PathBuf {
+    let path = scratch("leaf.csr");
+    std::fs::write(
+        &path,
+        crate::files::pem(crate::files::REQUEST, &[0x30, 0x00]),
+    )
+    .unwrap();
+    path
+}
+
+#[test]
+fn submit_names_the_template_among_those_the_ca_offers() {
+    let csr = request_file();
+    let host = fake().replying(submission(
+        pkid_core::Outcome::Issued(vec![0x30, 0x00]),
+        &[],
+    ));
+    let output = running(
+        &host,
+        &format!("request submit Issuing server {}", csr.display()),
+    )
+    .unwrap();
+    assert!(output.text.starts_with("-----BEGIN CERTIFICATE-----\n"));
+    assert_eq!(output.json["status"], "issued");
+    let Request::Submit {
+        ca,
+        template,
+        csr: sent,
+    } = host.sent()
+    else {
+        panic!()
+    };
+    assert_eq!(ca, "22222222-2222-4222-8222-222222222222");
+    assert_eq!(template, "t-server");
+    assert_eq!(sent, [0x30, 0x00]);
+
+    let failure = running(
+        &fake(),
+        &format!("request submit Issuing Device {}", csr.display()),
+    )
+    .unwrap_err();
+    assert_eq!(failure.kind, Kind::NotFound);
+    assert_eq!(failure.message, "CA Issuing offers no template 'Device'");
+}
+
+#[test]
+fn a_held_request_says_how_to_collect_its_certificate() {
+    let csr = request_file();
+    let out = scratch("held.pem");
+    let host = fake().replying(submission(
+        pkid_core::Outcome::Pending,
+        &["approval required"],
+    ));
+    let output = running(
+        &host,
+        &format!(
+            "request submit Issuing Server {} --out {}",
+            csr.display(),
+            out.display()
+        ),
+    )
+    .unwrap();
+    assert!(output
+        .text
+        .starts_with("Request 42 awaits approval: approval required.\n"));
+    assert!(output
+        .text
+        .contains("pki cert get 22222222-2222-4222-8222-222222222222 42"));
+    // Nothing was issued, so nothing is left at the output path.
+    assert!(!out.exists());
+}
+
+#[test]
+fn a_refused_request_fails_with_its_reasons() {
+    let csr = request_file();
+    let host = fake().replying(submission(
+        pkid_core::Outcome::Denied,
+        &["name not allowed"],
+    ));
+    let failure = running(
+        &host,
+        &format!("request submit Issuing Server {}", csr.display()),
+    )
+    .unwrap_err();
+    assert_eq!(failure.kind, Kind::Failed);
+    assert!(
+        failure
+            .message
+            .ends_with("request 42 was denied: name not allowed"),
+        "{failure:?}"
+    );
+}
+
+#[test]
+fn approving_your_own_request_is_access_denied() {
+    let host = fake();
+    *host.reply.borrow_mut() = Some(Err(ClientError::Refused(WireError::new(
+        ErrorCode::SelfApproval,
+        "an officer may not approve their own request",
+    ))));
+    let failure = running(&host, "request approve Issuing 42").unwrap_err();
+    assert_eq!(failure.kind.status(), 3);
+    assert_eq!(
+        failure.message,
+        "approve 42: an officer may not approve their own request"
+    );
+}
+
+#[test]
+fn deny_records_its_reason() {
+    let host = fake().replying(Reply::Done);
+    running(&host, "request deny Issuing 42 --reason duplicate").unwrap();
+    assert_eq!(
+        host.sent(),
+        Request::Deny {
+            ca: "22222222-2222-4222-8222-222222222222".into(),
+            request: 42,
+            reason: Some("duplicate".into()),
+        }
+    );
+}
+
+#[test]
+fn request_listings_filter_by_status() {
+    let host = fake().replying(Reply::Requests(vec![pkid_core::RequestInfo {
+        id: 7,
+        template: "t-server".into(),
+        names: vec!["www.example.org".into()],
+        requester: "S-1-5-21-1-2-3-1001".into(),
+        submitted: 0,
+        status: pkid_core::RequestStatus::Pending,
+        reasons: Vec::new(),
+        decided: None,
+        decider: None,
+    }]));
+    let output = running(&host, "request list Issuing --status pending").unwrap();
+    assert!(
+        output.text.contains("7   pending  Server"),
+        "{}",
+        output.text
+    );
+    let Request::Requests { query, .. } = host.sent() else {
+        panic!()
+    };
+    assert_eq!(query.status, Some(pkid_core::RequestStatus::Pending));
+    assert_eq!(query.after, None);
+}
+
+#[test]
+fn revoke_sends_the_rfc_5280_code() {
+    let host = fake().replying(Reply::Done);
+    let output = running(&host, "cert revoke Issuing 0A:1b --reason key-compromise").unwrap();
+    assert_eq!(output.text, "Revoked certificate 0a1b.\n");
+    assert_eq!(
+        host.sent(),
+        Request::Revoke {
+            ca: "22222222-2222-4222-8222-222222222222".into(),
+            serial: vec![0x0a, 0x1b],
+            reason: 1,
+        }
+    );
+    let host = fake().replying(Reply::Done);
+    running(&host, "cert revoke Issuing 0a1b").unwrap();
+    let Request::Revoke { reason, .. } = host.sent() else {
+        panic!()
+    };
+    assert_eq!(reason, 0);
+
+    assert!(
+        usage_error("cert revoke Issuing 0a1b --reason certificate-hold")
+            .starts_with("--reason <reason>: 'certificate-hold' is not one of unspecified, ")
+    );
+    let failure = running(&fake(), "cert revoke Issuing nonsense").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+}
+
+#[test]
+fn get_writes_the_certificate_issued_for_a_request() {
+    let out = scratch("got.pem");
+    let host = fake().replying(Reply::Certificate(pkid_core::CertificateInfo {
+        serial: vec![0x01],
+        request: 42,
+        der: vec![0x30, 0x00],
+        not_before: 0,
+        not_after: 1,
+        owner: None,
+        revocation: None,
+    }));
+    let output = running(&host, &format!("cert get Issuing 42 -o {}", out.display())).unwrap();
+    assert_eq!(output.json["status"], "expired");
+    assert!(std::fs::read_to_string(&out)
+        .unwrap()
+        .starts_with("-----BEGIN CERTIFICATE-----"));
+    std::fs::remove_file(out).unwrap();
+}

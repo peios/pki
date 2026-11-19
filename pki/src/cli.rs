@@ -38,6 +38,12 @@ pub enum Command {
     /// Create and manage CAs
     #[command(subcommand)]
     Ca(Ca),
+    /// Submit certificate requests, and approve or deny them
+    #[command(subcommand)]
+    Request(RequestCommand),
+    /// Find and revoke issued certificates
+    #[command(subcommand)]
+    Cert(Cert),
     /// Print help for pki or one of its commands
     #[command(override_usage = "pki help [<command>]")]
     Help {
@@ -115,6 +121,141 @@ pub enum Ca {
     /// Change which templates a CA issues and where its CRL is published
     Set(Set),
 }
+
+#[derive(Debug, Subcommand)]
+pub enum RequestCommand {
+    /// Submit a certificate request
+    Submit {
+        /// The CA to ask
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The template to issue from, by name or GUID
+        #[arg(value_name = "template")]
+        template: String,
+        /// The request, in PEM or DER
+        #[arg(value_name = "request-file")]
+        request: PathBuf,
+        /// Write the certificate to a file (default: standard output)
+        #[arg(short, long, value_name = "file")]
+        out: Option<PathBuf>,
+    },
+    /// List a CA's requests, oldest first
+    List {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// List only requests that are pending, issued or denied
+        #[arg(
+            long,
+            value_name = "status",
+            value_parser = ["pending", "issued", "denied"],
+            hide_possible_values = true,
+        )]
+        status: Option<String>,
+    },
+    /// Show a request
+    Show {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The request's number
+        #[arg(value_name = "request")]
+        request: i64,
+    },
+    /// Approve a pending request, issuing its certificate
+    Approve {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The request's number
+        #[arg(value_name = "request")]
+        request: i64,
+        /// Write the certificate to a file
+        #[arg(short, long, value_name = "file")]
+        out: Option<PathBuf>,
+    },
+    /// Deny a pending request
+    Deny {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The request's number
+        #[arg(value_name = "request")]
+        request: i64,
+        /// Record why
+        #[arg(long, value_name = "text")]
+        reason: Option<String>,
+    },
+}
+
+#[derive(Debug, Subcommand)]
+pub enum Cert {
+    /// List the certificates a CA has issued
+    List {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// Leave out revoked certificates
+        #[arg(long)]
+        unrevoked: bool,
+    },
+    /// Show a certificate
+    Show {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The certificate's serial number, in hex
+        #[arg(value_name = "serial")]
+        serial: String,
+        /// Write the certificate to a file
+        #[arg(short, long, value_name = "file")]
+        out: Option<PathBuf>,
+    },
+    /// Fetch the certificate issued for a request
+    Get {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The request's number
+        #[arg(value_name = "request")]
+        request: i64,
+        /// Write the certificate to a file (default: standard output)
+        #[arg(short, long, value_name = "file")]
+        out: Option<PathBuf>,
+    },
+    /// Revoke a certificate
+    Revoke {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The certificate's serial number, in hex
+        #[arg(value_name = "serial")]
+        serial: String,
+        /// Give the reason, as RFC 5280 names it (default: unspecified)
+        #[arg(
+            long,
+            value_name = "reason",
+            default_value = "unspecified",
+            hide_default_value = true,
+            value_parser = REASONS.map(|(name, _)| name),
+            hide_possible_values = true,
+        )]
+        reason: String,
+    },
+}
+
+/// The revocation reasons pki offers, with their RFC 5280 codes.
+/// certificateHold is left out: pkid can't release a hold, so it would be
+/// a permanent revocation under a temporary name.
+pub const REASONS: [(&str, u8); 7] = [
+    ("unspecified", 0),
+    ("key-compromise", 1),
+    ("ca-compromise", 2),
+    ("affiliation-changed", 3),
+    ("superseded", 4),
+    ("cessation-of-operation", 5),
+    ("privilege-withdrawn", 9),
+];
 
 /// Who signs a new CA's certificate.
 #[derive(Debug, Args)]

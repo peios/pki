@@ -5,6 +5,7 @@ mod cli;
 mod failure;
 mod files;
 mod host;
+mod issue;
 mod run;
 mod secret;
 mod show;

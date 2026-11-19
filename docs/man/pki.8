@@ -40,6 +40,48 @@ pki \- manage the Peios certificate authority
 .I ca
 .RI [ options ]
 .br
+.B pki request submit
+.I ca template request-file
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki request list
+.I ca
+.RB [ \-\-status
+.IR status ]
+.br
+.B pki request show
+.I ca request
+.br
+.B pki request approve
+.I ca request
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki request deny
+.I ca request
+.RB [ \-\-reason
+.IR text ]
+.br
+.B pki cert list
+.I ca
+.RB [ \-\-unrevoked ]
+.br
+.B pki cert show
+.I ca serial
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki cert get
+.I ca request
+.RB [ \-\-out
+.IR file ]
+.br
+.B pki cert revoke
+.I ca serial
+.RB [ \-\-reason
+.IR reason ]
+.br
 .B pki help
 .RI [ command ]
 .SH DESCRIPTION
@@ -165,6 +207,72 @@ Change which templates
 .I ca
 issues from, or the CRL distribution points its certificates name.
 Each list given replaces the current one; a list not given stays as it is.
+.TP
+.BI "request submit " "ca template request-file"
+Ask
+.I ca
+for a certificate, under one of the templates it offers.
+.I ca
+issues it at once, holds it for an officer to approve, or refuses it, as its template and the name trees decide.
+An issued certificate goes to standard output, or to the file
+.B \-\-out
+names.
+A held request's number is printed, to collect the certificate by once it is approved.
+.TP
+.BI "request list " ca
+List
+.IR ca 's
+requests, oldest first: number, status, template, when it was submitted, and the names it asked for.
+.BI \-\-status " status"
+lists only those that are
+.BR pending ,
+.B issued
+or
+.BR denied .
+.TP
+.BI "request show " "ca request"
+Show a request in full, including who submitted it, who decided it and why it was held or refused.
+.TP
+.BI "request approve " "ca request"
+Approve a held request, issuing its certificate.
+Only an officer of the CA may, and never for a request they submitted themselves.
+.TP
+.BI "request deny " "ca request"
+Refuse a held request.
+.BI \-\-reason " text"
+records why.
+.TP
+.BI "cert list " ca
+List the certificates
+.I ca
+has issued, in order of their requests: serial number, request, whether each is valid, expired or revoked, when it expires, and its subject.
+.B \-\-unrevoked
+leaves out revoked certificates.
+.TP
+.BI "cert show " "ca serial"
+Show a certificate, with its revocation if it has one.
+.B \-\-out
+also writes it to a file.
+.TP
+.BI "cert get " "ca request"
+Fetch the certificate issued for a request, such as one an officer has since approved, to standard output or the file
+.B \-\-out
+names.
+.TP
+.BI "cert revoke " "ca serial"
+Revoke a certificate.
+.BI \-\-reason " reason"
+gives the reason, as RFC 5280 names it:
+.BR unspecified ,
+the default,
+.BR key\-compromise ,
+.BR ca\-compromise ,
+.BR affiliation\-changed ,
+.BR superseded ,
+.B cessation\-of\-operation
+or
+.BR privilege\-withdrawn .
+Revocation cannot be undone.
 .TP
 .BR help " [\fIcommand\fR]"
 Print help for
@@ -350,6 +458,78 @@ or
 prints the
 .B certificate
 in PEM.
+.PP
+A request has
+.BR id ,
+.B status
+.RB ( pending ,
+.B issued
+or
+.BR denied ),
+.B template
+and
+.BR template_name ,
+.BR names ,
+.BR requester ,
+.BR submitted ,
+.BR reasons ,
+.B decided
+and
+.BR decider .
+.B request list
+prints
+.BR requests ,
+and
+.B request show
+prints one.
+.B request submit
+and
+.B request approve
+print the
+.BR request 's
+number and
+.BR status ,
+with the
+.B certificate
+in PEM when it was issued, or the
+.B reasons
+it is held.
+.PP
+A certificate has
+.B serial
+(in hex),
+.BR request ,
+.B status
+.RB ( valid ,
+.B expired
+or
+.BR revoked ),
+.BR subject ,
+.BR not_before ,
+.BR not_after ,
+.BR owner ,
+.B sha256
+and
+.BR revocation :
+its
+.BR revoked ,
+.B reason
+and
+.BR revoker ,
+or null.
+.B cert list
+prints
+.BR certificates ;
+.B cert show
+and
+.B cert get
+print one, with
+.B cert get
+adding the
+.B certificate
+in PEM.
+.PP
+Times are in RFC 3339, in UTC, and people are named by their SIDs.
 A file written is named by
 .B written
 or, for
@@ -376,17 +556,18 @@ Success.
 .B 1
 Failure, such as
 .B pkid
-not running, a passphrase that is wrong or too short, or a certificate that does not fit its CA.
+not running, a passphrase that is wrong or too short, a certificate that does not fit its CA, or a request the CA refused.
 .TP
 .B 2
 Usage error: an unknown command or option, a missing argument, a value that is not valid, or a CA name more than one CA has.
 .TP
 .B 3
 Access denied: you may not do this to the CA, or run
-.BR setup .
+.BR setup ,
+or the request you would approve is your own.
 .TP
 .B 4
-Not found: no CA or template has the name given, or a file does not exist.
+Not found: no CA, template, request or certificate is the one given, or a file does not exist.
 .TP
 .B 5
 Already exists: an output file exists, or the CA already has its certificate.
@@ -409,6 +590,15 @@ Write the root's certificate, to give to the machines that are to trust it.
 .TP
 .B pki ca export\-key """Lab Issuing""" issuing.key
 Back up an exportable CA key.
+.TP
+.B pki request submit """Lab Issuing""" Server www.csr \-\-out www.pem
+Ask for a server certificate.
+.TP
+.B pki request list """Lab Issuing""" \-\-status pending
+List the requests waiting for an officer.
+.TP
+.B pki cert revoke """Lab Issuing""" 4f:1a:09 \-\-reason key\-compromise
+Revoke a certificate whose key was exposed.
 .SH SEE ALSO
 .BR pkid (8),
 .BR regman (1)
