@@ -1,0 +1,11 @@
+[package]
+name = "pkid-client"
+description = "The client for pkid's control socket, used by the pki command and window."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+peios.workspace = true
+pkid-core = { path = "../pkid-core" }

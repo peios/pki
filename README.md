@@ -22,15 +22,21 @@ Registry configuration is described in [pkid.regman](docs/pkid.regman).
 All cryptography goes through `peios-crypto`, from peios-rs: keys, signing,
 randomness and checking the signatures on certificate requests.
 
+`pkid-core` is pkid's control wire, a PSPU §3.15 channel at
+`/run/pkid/pki.sock`, and `pkid-client` is the client the `pki` command and
+window use. They link libpeios.
+
 ## Build and test
 
 ```sh
-pekit test -j 2 unit policy keys store pipeline clippy doctests
+pekit test -j 2 unit policy keys store pipeline wire client clippy doctests
 ```
 
-The same checks run directly with Cargo:
+`wire` and `client` test the crates that link libpeios, which pekit builds
+from the SDK at the commit `pekit.lock` pins. Cargo builds only the portable
+crates, the workspace's default members:
 
 ```sh
-cargo +1.98.1 test --workspace --locked
-cargo +1.98.1 clippy --workspace --all-targets --locked -- -Dwarnings
+cargo +1.98.1 test --locked
+cargo +1.98.1 clippy --all-targets --locked -- -Dwarnings
 ```
