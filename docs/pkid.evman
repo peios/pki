@@ -1,0 +1,102 @@
+--- field subject.token.sid
+type: str
+
+The SID of the principal that made the request: the requester of a
+submission, or the officer who decided or revoked.
+
+pkid reads it from the token the kernel captured when the caller connected.
+
+--- field object.pkid.ca
+type: str
+
+The identifier of the CA the request was made to, its key under
+Machine\Software\Pki\Authorities.
+
+--- field object.pkid.request
+type: int
+
+The CA database's number for the request. Numbers are assigned in order and
+never reused.
+
+--- field object.pkid.outcome
+type: str.enum
+values: issued | pending | denied
+closed: true
+
+What policy decided for a submitted request: issued at once, held for an
+officer, or refused.
+
+--- field object.pkid.serial
+type: bin
+
+The revoked certificate's serial number, as the big-endian integer encoded in
+the certificate.
+
+--- field object.pkid.reason
+type: uint
+
+The RFC 5280 revocation reason code.
+
+--- field outcome.success
+type: bool
+
+Whether pkid can serve the configuration it loaded.
+
+--- field outcome.reason
+type: str
+
+Why the configuration can't be served: the first record found invalid, by
+its key below Machine\Software\Pki.
+
+--- event pkid.configuration.loaded
+tier: standard
+gating: none
+cardinality: once at start and once per configuration change
+
+pkid read its configuration from the Registry.
+
+A configuration that can't be served stops pkid issuing until it is
+corrected; pkid never issues from part of one. Who changed the configuration
+is recorded by the Registry's own audit, not here.
+
+include: outcome.success, outcome.reason
+
+--- event pkid.request.submitted
+tier: standard
+gating: none
+cardinality: once per recorded request
+
+A request was submitted and recorded with its outcome.
+
+Requests refused before they are recorded, for lack of the Request right or
+for naming a template the CA doesn't offer, appear only in the kernel's
+access audit.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.request, object.pkid.outcome
+
+--- event pkid.request.approved
+tier: standard
+gating: none
+cardinality: once per approval
+
+An officer approved a held request, and its certificate was issued.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.request
+
+--- event pkid.request.denied
+tier: standard
+gating: none
+cardinality: once per denial
+
+An officer denied a held request.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.request
+
+--- event pkid.certificate.revoked
+tier: standard
+gating: none
+cardinality: once per revocation
+
+An officer revoked a certificate.
+
+include: subject.token.sid, object.pkid.ca, object.pkid.serial, object.pkid.reason

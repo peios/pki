@@ -15,3 +15,5 @@ def native_crates() -> rust.RustWorkspace {
         libclang = [clang.libclang_18()],
     )
 }
+
+def build pkid() { = rust.bin(native_crates(), "pkid") }

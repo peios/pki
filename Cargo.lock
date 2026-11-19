@@ -630,6 +630,23 @@ dependencies = [
 ]
 
 [[package]]
+name = "pkid"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "peios",
+ "peios-crypto",
+ "pki-core",
+ "pki-keys",
+ "pki-pipeline",
+ "pki-policy",
+ "pki-store",
+ "pkid-core",
+ "rcgen",
+ "time",
+]
+
+[[package]]
 name = "pkid-client"
 version = "0.1.0"
 dependencies = [
