@@ -12,6 +12,7 @@ set -u
 runtime=/lcl/radius-dev/current
 export PATH=$runtime/bin:$PATH LD_LIBRARY_PATH=$runtime/lib
 pkid_sid=S-1-5-80-927106304-3681130234-3843647545-210868499-909250352
+httpd_sid=S-1-5-80-4101192810-2505649581-2921298127-1686389970-3617382032
 ca='Test Issuing'
 
 step() {
@@ -30,6 +31,26 @@ dump() {
 }
 
 printf 'correct horse battery staple\n' > /tmp/passphrase
+
+# One HTTP request over bash's /dev/tcp, the whole response saved to FILE.
+http() {
+    local method=$1 path=$2 file=$3
+    exec 3<>/dev/tcp/127.0.0.1/80 || return 1
+    printf '%s %s HTTP/1.1\r\nHost: pki.test.home\r\n\r\n' "$method" "$path" >&3
+    cat <&3 > "$file"
+    exec 3<&-
+    local status
+    read -r status < "$file"
+    echo "${status%$'\r'}"
+}
+
+# The port table a shipped image seeds: unreserved ports for anyone, ports
+# below 1024 for SYSTEM alone. pki-httpd can bind 80 only once setup has
+# reserved it.
+ports=Machine/System/Network/TcpIp/PortReservations
+reg new -p "$ports"
+reg set "$ports" @ hex:010004801400000020000000000000002c000000010100000000000512000000010100000000000512000000020030000200000000001400010000000101000000000001000000000000140000000010010100000000000512000000
+reg set "$ports" tcp,udp:1-1023 hex:010004801400000020000000000000002c00000001010000000000051200000001010000000000051200000002001c00010000000000140001000000010100000000000512000000
 
 # Provisioning, then the service.
 step setup pki setup
@@ -65,9 +86,28 @@ step media sd set /var/state/pki-media "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;OICI;FA;;;
 # CAs.
 step list-empty pki ca list
 step root pki ca create 'Test Root' --root --key-file /var/state/pki-media/root.key \
-    --passphrase-file /tmp/passphrase
+    --passphrase-file /tmp/passphrase --crl http://pki.test.home/crl/root.crl
 step issuing pki ca create "$ca" --issuer 'Test Root' --issuer-passphrase-file /tmp/passphrase \
-    --template Server --template Device
+    --template Server --template Device --crl http://pki.test.home/crl/issuing.crl
+
+# CRLs: the root's, by hand, as its key is sealed; the issuing CA's by
+# pkid's own schedule, which checks each minute.
+step root-crl pki ca publish-crl 'Test Root' --passphrase-file /tmp/passphrase
+sleep 65
+step define-httpd svctl definition create pki-httpd --set ImagePath=/bin/bash --set Arguments=-c \
+    --set "Arguments=export LD_LIBRARY_PATH=$runtime/lib; exec $runtime/bin/pki-httpd >/run/pki-httpd/log 2>&1" \
+    --set Identity=Service --set RuntimeDirectories=pki-httpd --set Requires=authd --set Readiness=Notify \
+    --set RequiredPrivileges=SeChangeNotifyPrivilege
+step start-httpd svctl start pki-httpd
+sleep 1
+step status-httpd svctl status pki-httpd
+step published ls -la /var/state/pki/http /var/state/pki/http/crl
+step fetch-root http GET /crl/root.crl /tmp/root.crl.http
+step fetch-issuing http GET /crl/issuing.crl /tmp/issuing-before.crl.http
+step fetch-head http HEAD /crl/issuing.crl /tmp/head.http
+step fetch-missing http GET /crl/nothing.crl /tmp/missing.http
+step fetch-escape http GET /../pkid.db /tmp/escape.http
+step fetch-post http POST /crl/issuing.crl /tmp/post.http
 step list pki ca list
 step list-json pki --json ca list
 step show-root pki ca show 'Test Root' --out /tmp/root.pem
@@ -104,6 +144,7 @@ listing=$(pki --json cert list "$ca")
 serial=
 [[ $listing =~ \"serial\":\"([0-9a-f]+)\" ]] && serial=${BASH_REMATCH[1]}
 step revoke pki cert revoke "$ca" "$serial" --reason key-compromise
+step fetch-revoked http GET /crl/issuing.crl /tmp/issuing-after.crl.http
 step revoked pki cert show "$ca" "$serial"
 step revoke-again pki cert revoke "$ca" "$serial"
 
@@ -127,8 +168,14 @@ sleep 2
 step list-after-restart pki ca list
 step certs-after-restart pki cert list "$ca"
 
-step log cat /run/pkid/log /run/authd.log
+step list-crls pki ca list
+step log cat /run/pkid/log /run/authd.log /run/pki-httpd/log
 dump root.pem /tmp/root.pem
 dump www.p12 /tmp/www.p12
 dump alice.p12 /tmp/alice.p12
+dump root.crl.http /tmp/root.crl.http
+dump issuing-before.crl.http /tmp/issuing-before.crl.http
+dump issuing-after.crl.http /tmp/issuing-after.crl.http
+dump head.http /tmp/head.http
+dump www.pem.serial <(printf '%s' "$serial")
 echo "=== QUALIFY DONE"

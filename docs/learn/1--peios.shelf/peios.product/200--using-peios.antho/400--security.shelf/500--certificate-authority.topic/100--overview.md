@@ -120,6 +120,17 @@ Each CA's descriptor grants four rights:
 By default, Authenticated Users can request, and Administrators and SYSTEM
 hold every right. `pkid(8)` describes each right and descriptor.
 
+## Revocation
+
+A certificate can be revoked before it expires, such as when its key is
+exposed. Each CA publishes a certificate revocation list (CRL) of what it has
+revoked, which pki-httpd serves over HTTP at an address written into every
+certificate the CA issues, so that software checking a certificate can find
+out. pkid renews the list of a CA whose key it keeps; an offline root's list
+is renewed by hand, with its passphrase.
+[Publishing Revocation Lists](~peios/certificate-authority/publishing-revocation-lists)
+explains how.
+
 ## Where it is kept
 
 The configuration, the templates, names, and CAs, is in the Registry under

@@ -5,6 +5,7 @@ description: Prepare a Peios machine for pkid, create a root CA with its key
   on removable media and an issuing CA below it, and distribute the root.
 related:
   - peios/certificate-authority/overview
+  - peios/certificate-authority/publishing-revocation-lists
   - peios/certificate-authority/controlling-who-can-request-certificates
   - peios/certificate-trust/adding-and-distrusting
 ---
@@ -41,13 +42,23 @@ running it again changes nothing you have set.
 1. Create the root, with its key sealed in a file on the removable media:
 
    ```sh
-   pki ca create "Home Root" --root --key-file /media/usb/home-root.key
+   pki ca create "Home Root" --root --key-file /media/usb/home-root.key \
+     --crl http://pki.home/crl/home-root.crl
    ```
 
    `pki` asks for the key's passphrase twice. pkid makes the key and the
-   root's certificate, which lasts 10 years.
+   root's certificate, an RSA-4096 one that lasts 10 years. `--crl` is the
+   address where the root's revocation list will be published, and goes
+   into the certificates the root signs; see
+   [Publishing Revocation Lists](~peios/certificate-authority/publishing-revocation-lists).
 
-2. Write the root's certificate to a file, to give to the devices that are
+2. Publish the root's first revocation list while its key is to hand:
+
+   ```sh
+   pki ca publish-crl "Home Root"
+   ```
+
+3. Write the root's certificate to a file, to give to the devices that are
    to trust it:
 
    ```sh
@@ -60,15 +71,18 @@ running it again changes nothing you have set.
 
    ```sh
    pki ca create "Home Issuing" --issuer "Home Root" \
-     --template Server --template Device
+     --template Server --template Device \
+     --crl http://pki.home/crl/home-issuing.crl
    ```
 
    `pki` asks for the root key's passphrase, since the root signs the new
    CA's certificate. The issuing CA's key goes in pkid's store, so it issues
-   without a passphrase, and its certificate lasts 5 years.
+   without a passphrase, and its certificate lasts 5 years. pkid publishes
+   its revocation lists itself.
 
 2. Unmount the removable media and store it safely. The root is needed again
-   only to sign another CA.
+   to sign another CA, and to renew its revocation list, which lasts 180
+   days.
 
 ## Check the result
 
