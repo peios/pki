@@ -10,5 +10,5 @@ pki-core = { path = "../pki-core" }
 time.workspace = true
 
 [dev-dependencies]
-rcgen.workspace = true
+rcgen = { workspace = true, features = ["aws_lc_rs"] }
 time = { workspace = true, features = ["macros"] }

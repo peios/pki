@@ -1,11 +1,12 @@
 //! Creating roots and issuing certificates from a CA.
 
+use peios_crypto::Signer;
 use x509_parser::certificate::X509Certificate;
 use x509_parser::extensions::GeneralName;
 use x509_parser::prelude::FromDer;
 
 use crate::extensions::sid_extension;
-use crate::key::{oid_arcs, RcgenSigner, Signer, SubjectPublicKey};
+use crate::key::{oid_arcs, RcgenSigner, SubjectPublicKey};
 use crate::names::{AltName, DnsName, NameConstraints, NameSubtree};
 use crate::profile::{CaProfile, CaSubject, CommonName, LeafProfile, SerialNumber, Validity};
 use crate::request::OID_USER_PRINCIPAL_NAME;
@@ -37,7 +38,7 @@ pub fn create_root(
     serial: &SerialNumber,
 ) -> Result<Certificate, Error> {
     let params = ca_params(profile, serial)?;
-    let signer = RcgenSigner::new(signer);
+    let signer = RcgenSigner::new(signer)?;
     let certificate = params
         .self_signed(&signer)
         .map_err(|error| signer.error(error))?;
@@ -73,7 +74,7 @@ impl<'a> IssuingCa<'a> {
                 "trailing bytes after the certificate".into(),
             ));
         }
-        if certificate.public_key().raw != signer.public_key().der() {
+        if certificate.public_key().raw != signer.public_key().spki() {
             return Err(Error::InvalidIssuer(
                 "the signer's key is not the certificate's".into(),
             ));
@@ -195,7 +196,7 @@ impl<'a> IssuingCa<'a> {
     pub(crate) fn rcgen_issuer(&self) -> Result<rcgen::Issuer<'static, RcgenSigner<'a>>, Error> {
         let issuer = rcgen::Issuer::from_ca_cert_der(
             &self.certificate.as_slice().into(),
-            RcgenSigner::new(self.signer),
+            RcgenSigner::new(self.signer)?,
         )?;
         Ok(issuer)
     }

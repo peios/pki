@@ -24,8 +24,8 @@ pub use ca::{create_root, Certificate, IssuingCa};
 pub use crl::{CrlProfile, RevocationList, RevocationReason, RevokedCertificate};
 pub use error::Error;
 pub use key::{
-    EcdsaCurve, KeyAlgorithm, RsaModulusBits, Signer, SoftwareKey, SubjectPublicKey,
-    MAX_RSA_MODULUS_BITS, MIN_RSA_MODULUS_BITS,
+    EcdsaCurve, KeyAlgorithm, RsaModulusBits, SubjectPublicKey, MAX_RSA_MODULUS_BITS,
+    MIN_RSA_MODULUS_BITS,
 };
 pub use names::{
     AltName, DnsName, Mailbox, NameConstraints, NameSubtree, Sid, SubjectAttribute,

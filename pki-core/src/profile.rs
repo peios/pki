@@ -1,6 +1,5 @@
 //! Everything needed to build a certificate, as decided by policy.
 
-use ring::rand::{SecureRandom, SystemRandom};
 use time::OffsetDateTime;
 
 use crate::names::{AltName, NameConstraints, Sid, SubjectAttribute};
@@ -54,13 +53,10 @@ impl SerialNumber {
     /// Generates an unpredictable serial number.
     pub fn random() -> Result<Self, Error> {
         let mut bytes = [0; SERIAL_LEN];
-        let random = SystemRandom::new();
         // Clearing the top bit keeps the integer positive; a non-zero first
         // byte keeps its DER encoding exactly these bytes.
         loop {
-            random
-                .fill(&mut bytes)
-                .map_err(|_| Error::Signing("no randomness for a serial number".into()))?;
+            peios_crypto::random::fill(&mut bytes).map_err(Error::Crypto)?;
             bytes[0] &= 0x7f;
             if bytes[0] != 0 {
                 return Ok(Self(bytes.to_vec()));
