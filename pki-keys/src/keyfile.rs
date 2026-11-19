@@ -57,6 +57,12 @@ pub struct KeyDescription {
     pub exportable: bool,
 }
 
+/// `key` as a key file sealed under `passphrase`, such as one a requester
+/// keeps while its certificate awaits approval.
+pub fn seal_key(key: &PrivateKey, passphrase: &NewPassphrase) -> Result<Vec<u8>, KeyError> {
+    KeyFile::seal(key, passphrase)
+}
+
 /// A parsed key file.
 pub(crate) struct KeyFile {
     description: KeyDescription,

@@ -3,6 +3,7 @@
 
 mod cli;
 mod config;
+mod enroll;
 mod failure;
 mod files;
 mod host;

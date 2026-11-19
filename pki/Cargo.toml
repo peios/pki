@@ -12,6 +12,7 @@ libc = "0.2"
 peios.workspace = true
 peios-crypto.workspace = true
 pem.workspace = true
+pki-core = { path = "../pki-core" }
 pki-keys = { path = "../pki-keys" }
 pki-management = { path = "../pki-management" }
 pki-policy = { path = "../pki-policy" }

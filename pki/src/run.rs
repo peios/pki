@@ -13,7 +13,7 @@ use crate::files::{self, Reserved};
 use crate::host::Host;
 use crate::secret;
 use crate::show::{self, Output};
-use crate::{config, issue};
+use crate::{config, enroll, issue};
 
 pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
     match command {
@@ -21,6 +21,7 @@ pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
         Command::Ca(command) => ca(host, command),
         Command::Request(command) => issue::request(host, command),
         Command::Cert(command) => issue::cert(host, command),
+        Command::Enroll(enroll) => enroll::enroll(host, enroll),
         Command::Template(command) => config::template(host, command),
         Command::Name(command) => config::name(host, command),
         Command::Help { .. } => unreachable!("main prints help"),
@@ -129,7 +130,7 @@ fn passphrase(text: Zeroizing<String>) -> Passphrase {
 }
 
 /// A passphrase that opens something already sealed.
-fn existing_passphrase(
+pub fn existing_passphrase(
     host: &dyn Host,
     file: Option<&Path>,
     question: &str,
@@ -145,7 +146,7 @@ fn existing_passphrase(
 
 /// A passphrase to seal something under: asked twice on a terminal, and
 /// checked here so that a weak one fails before pkid does any work.
-fn new_passphrase(
+pub fn new_passphrase(
     host: &dyn Host,
     file: Option<&Path>,
     question: &str,

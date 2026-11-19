@@ -82,6 +82,27 @@ pki \- manage the Peios certificate authority
 .RB [ \-\-reason
 .IR reason ]
 .br
+.B pki enroll
+.I ca template
+.B \-\-out
+.I file
+.RB [ \-\-dns
+.IR name ]
+.RB [ \-\-email
+.IR address ]
+.RB [ \-\-upn
+.IR name ]
+.RI [ options ]
+.br
+.B pki enroll
+.I ca
+.B \-\-request
+.I request
+.B \-\-key
+.I file
+.B \-\-out
+.I file
+.br
 .B pki template list
 .br
 .B pki template show
@@ -333,6 +354,51 @@ or
 .BR privilege\-withdrawn .
 Revocation cannot be undone.
 .TP
+.BI "enroll " "ca template"
+Make a key on this machine, ask
+.I ca
+to certify it under
+.I template
+for the names given, and write the key with its certificate and the CA certificates above it to the PKCS #12 file
+.B \-\-out
+names, such as to import into a phone for EAP-TLS.
+Give at least one name, with
+.BR \-\-dns ,
+.B \-\-email
+or
+.BR \-\-upn ;
+each may be repeated.
+The key never reaches
+.BR pkid ,
+which sees only the request.
+.B pki
+asks for a new passphrase to protect the file.
+.IP
+If the request is held for approval,
+.B pki
+seals the key under the same passphrase in a file beside the one it would have written, named with
+.B .key
+added, and prints the command that collects the certificate once it is approved:
+.B \-\-request
+and
+.B \-\-key
+name the request and that file, and
+.B pki
+writes the PKCS #12 file then.
+.IP
+.BI \-\-algorithm " algorithm"
+chooses the key, as for
+.BR "ca create" ;
+the default is
+.BR ecdsa\-p256 .
+.BI \-\-friendly\-name " text"
+labels the key in the file; the default is the first name.
+.B \-\-passphrase\-file
+gives the passphrase as a file's first line.
+.IP
+The file uses the encryption OpenSSL 3 writes by default, AES-256 with PBKDF2 and SHA-256.
+Current versions of OpenSSL, Windows and Firefox import it; Apple systems older than iOS 18 and macOS 15 are reported to refuse it.
+.TP
 .B template list
 List the templates: name, GUID, whether they issue at once or hold for approval, lifetime, and purposes.
 .TP
@@ -347,7 +413,9 @@ starts from a copy of another; without it, give at least
 .B \-\-name\-type
 and
 .BR \-\-lifetime ,
-and the rest are the shipped templates' choices.
+and the rest are the shipped templates' choices, except that renewal is due only at expiry unless
+.B \-\-renewal\-window
+is given.
 A new template is offered by no CA until
 .B ca set
 adds it.
@@ -615,7 +683,9 @@ the CA key's, for
 the sealed key file's, for
 .BR "ca import" ;
 the key's current one, for
-.BR "ca export\-key" .
+.BR "ca export\-key" ;
+the PKCS #12 file's, and a held key's, for
+.BR enroll .
 .TP
 .B \-\-issuer\-passphrase\-file
 The issuing CA key's, for
@@ -750,6 +820,20 @@ print one, with
 adding the
 .B certificate
 in PEM.
+.B enroll
+prints the
+.BR request 's
+number,
+.BR status ,
+and the file
+.BR written ,
+with the certificate's
+.B subject
+and
+.BR not_after ,
+or, when held, the
+.B key_file
+the key is sealed in.
 .PP
 A template has
 .BR id ,
@@ -872,6 +956,9 @@ Ask for a server certificate.
 .TP
 .B pki request list """Lab Issuing""" \-\-status pending
 List the requests waiting for an officer.
+.TP
+.B pki enroll """Lab Issuing""" Device \-\-upn alice@home \-\-out alice.p12
+Make a certificate for Alice's phone to sign in to Wi-Fi with, and its key, in one file.
 .TP
 .B pki template create Web \-\-from Server \-\-issuance approval
 Make a server template whose every request waits for an officer.

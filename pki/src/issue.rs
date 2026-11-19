@@ -18,7 +18,7 @@ use crate::run::{call, resolve_ca, unexpected};
 use crate::show::{self, Output};
 
 /// The template `text` names among those `authority` offers.
-fn offered(authority: &AuthorityInfo, text: &str) -> Result<String, Failure> {
+pub fn offered(authority: &AuthorityInfo, text: &str) -> Result<String, Failure> {
     authority
         .templates
         .iter()

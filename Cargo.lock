@@ -605,7 +605,7 @@ dependencies = [
 [[package]]
 name = "peios"
 version = "0.4.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=fcf9a9341dfcff28eece119dfaffcacf2b2abf62#fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
+source = "git+https://github.com/peios/peios-rs.git?rev=b95a3b8dade9c8033898a389aa53122d6c1d4e9e#b95a3b8dade9c8033898a389aa53122d6c1d4e9e"
 dependencies = [
  "bitflags",
  "libc",
@@ -615,17 +615,18 @@ dependencies = [
 [[package]]
 name = "peios-crypto"
 version = "0.1.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=fcf9a9341dfcff28eece119dfaffcacf2b2abf62#fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
+source = "git+https://github.com/peios/peios-rs.git?rev=b95a3b8dade9c8033898a389aa53122d6c1d4e9e#b95a3b8dade9c8033898a389aa53122d6c1d4e9e"
 dependencies = [
  "argon2",
  "aws-lc-rs",
+ "yasna",
  "zeroize",
 ]
 
 [[package]]
 name = "peios-sys"
 version = "0.3.0"
-source = "git+https://github.com/peios/peios-rs.git?rev=fcf9a9341dfcff28eece119dfaffcacf2b2abf62#fcf9a9341dfcff28eece119dfaffcacf2b2abf62"
+source = "git+https://github.com/peios/peios-rs.git?rev=b95a3b8dade9c8033898a389aa53122d6c1d4e9e#b95a3b8dade9c8033898a389aa53122d6c1d4e9e"
 dependencies = [
  "bindgen",
  "pkg-config",
@@ -656,6 +657,7 @@ dependencies = [
  "peios",
  "peios-crypto",
  "pem",
+ "pki-core",
  "pki-keys",
  "pki-management",
  "pki-policy",

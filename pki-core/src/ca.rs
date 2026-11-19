@@ -60,6 +60,23 @@ pub fn ca_request(signer: &dyn Signer, subject: &CaSubject) -> Result<Vec<u8>, E
     Ok(request.der().to_vec())
 }
 
+/// A PKCS #10 request for a certificate for `signer`'s key naming `names`,
+/// as a requester sends it. Its subject is empty: the template decides the
+/// certificate's common name, and policy approves each name.
+pub fn leaf_request(signer: &dyn Signer, names: &[AltName]) -> Result<Vec<u8>, Error> {
+    if names.is_empty() {
+        return Err(Error::InvalidValue("a request must name something".into()));
+    }
+    let mut params = rcgen::CertificateParams::default();
+    params.distinguished_name = rcgen::DistinguishedName::new();
+    params.subject_alt_names = names.iter().map(san).collect();
+    let signer = RcgenSigner::new(signer)?;
+    let request = params
+        .serialize_request(&signer)
+        .map_err(|error| signer.error(error))?;
+    Ok(request.der().to_vec())
+}
+
 /// A CA certificate together with the signer for its key.
 pub struct IssuingCa<'a> {
     certificate: Vec<u8>,

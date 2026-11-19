@@ -44,6 +44,8 @@ pub enum Command {
     /// Find and revoke issued certificates
     #[command(subcommand)]
     Cert(Cert),
+    /// Make a key here, have it certified, and save both as PKCS #12
+    Enroll(Enroll),
     /// Define the kinds of certificate CAs issue
     #[command(subcommand)]
     Template(TemplateCommand),
@@ -419,6 +421,60 @@ pub const REASONS: [(&str, u8); 7] = [
     ("cessation-of-operation", 5),
     ("privilege-withdrawn", 9),
 ];
+
+#[derive(Debug, Args)]
+#[command(
+    override_usage = "pki enroll [options] <ca> <template> --out <file> <names>
+       pki enroll [options] <ca> --request <request> --key <file> --out <file>"
+)]
+pub struct Enroll {
+    /// The CA to ask
+    #[arg(value_name = "ca")]
+    pub ca: String,
+    /// The template to issue from, by name or GUID
+    #[arg(value_name = "template", required_unless_present = "request")]
+    pub template: Option<String>,
+    /// Name a host; repeat for more
+    #[arg(long = "dns", value_name = "name", conflicts_with = "request")]
+    pub dns: Vec<String>,
+    /// Name an email address; repeat for more
+    #[arg(long = "email", value_name = "address", conflicts_with = "request")]
+    pub emails: Vec<String>,
+    /// Name a user principal, such as for EAP-TLS; repeat for more
+    #[arg(long = "upn", value_name = "name", conflicts_with = "request")]
+    pub upns: Vec<String>,
+    /// Write the key and its certificates to this PKCS #12 file
+    #[arg(short, long, value_name = "file")]
+    pub out: PathBuf,
+    /// Choose the key algorithm (default: ecdsa-p256)
+    #[arg(
+        long,
+        value_name = "algorithm",
+        default_value = "ecdsa-p256",
+        hide_default_value = true,
+        value_parser = ["ecdsa-p256", "ecdsa-p384", "rsa-2048", "rsa-3072", "rsa-4096"],
+        hide_possible_values = true,
+        conflicts_with = "request",
+    )]
+    pub algorithm: String,
+    /// Label the key in the file (default: the first name)
+    #[arg(long, value_name = "text")]
+    pub friendly_name: Option<String>,
+    /// Collect the certificate for a request that was held for approval
+    #[arg(
+        long,
+        value_name = "request",
+        requires = "key",
+        conflicts_with = "template"
+    )]
+    pub request: Option<i64>,
+    /// The key pki enroll sealed while the request was held
+    #[arg(long, value_name = "file", requires = "request")]
+    pub key: Option<PathBuf>,
+    /// Read the passphrase from a file
+    #[arg(long, value_name = "file")]
+    pub passphrase_file: Option<PathBuf>,
+}
 
 /// Who signs a new CA's certificate.
 #[derive(Debug, Args)]

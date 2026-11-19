@@ -21,6 +21,9 @@ use crate::{cli, parse, run, Stop};
 
 const PASSPHRASE: &str = "correct horse battery staple";
 
+/// Answers pkid requests for a test.
+type Responder = Box<dyn Fn(&Request) -> Reply>;
+
 /// pkid, the Registry and the terminal, as a test sets them up.
 #[derive(Default)]
 struct Fake {
@@ -29,6 +32,8 @@ struct Fake {
     /// Each Registry change, in order.
     writes: RefCell<Vec<Write>>,
     warnings: RefCell<Vec<String>>,
+    /// Answers requests in place of `reply`, for as many as come.
+    respond: Option<Responder>,
     /// What pkid replies to anything but a listing.
     reply: RefCell<Option<Result<Reply, ClientError>>>,
     /// The answers to prompts, in order.
@@ -67,6 +72,9 @@ impl Host for Fake {
         self.sent.borrow_mut().push(request.clone());
         if let Request::Authorities = request {
             return Ok(Reply::Authorities(self.authorities.clone()));
+        }
+        if let Some(respond) = &self.respond {
+            return Ok(respond(request));
         }
         self.reply
             .borrow_mut()
@@ -1117,4 +1125,253 @@ fn names_that_exist_or_cannot_exist_are_refused() {
     let host = fake();
     running(&host, "name add www.lab.home --owner S-1-5-21-1-2-3-1002").unwrap();
     assert!(matches!(writes(&host).as_slice(), [Write::Create(..)]));
+}
+
+// Enrolment.
+
+/// A root CA that issues whatever it is asked, as pkid would once policy
+/// allowed it.
+struct TestCa {
+    key: pki_keys::PrivateKey,
+    root: Vec<u8>,
+}
+
+impl TestCa {
+    fn new() -> Self {
+        let key = pki_keys::PrivateKey::generate(pki_keys::KeyAlgorithm::EcdsaP256).unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let profile = pki_core::CaProfile {
+            subject: pki_core::CaSubject {
+                common_name: "Test Root".into(),
+                attributes: Vec::new(),
+            },
+            validity: pki_core::Validity::new(
+                now - time::Duration::days(1),
+                now + time::Duration::days(3650),
+            )
+            .unwrap(),
+            path_length: Some(0),
+            name_constraints: None,
+            extended_key_usages: None,
+            crl_distribution_points: Vec::new(),
+        };
+        let root =
+            pki_core::create_root(&key, &profile, &pki_core::SerialNumber::random().unwrap())
+                .unwrap()
+                .der()
+                .to_vec();
+        Self { key, root }
+    }
+
+    fn issue(&self, csr: &[u8]) -> Vec<u8> {
+        let request = pki_core::CertificateRequest::from_der(csr).unwrap();
+        let now = time::OffsetDateTime::now_utc();
+        let profile = pki_core::LeafProfile {
+            subject: pki_core::LeafSubject {
+                common_name: None,
+                attributes: Vec::new(),
+            },
+            alt_names: request.names().to_vec(),
+            key_usages: vec![pki_core::KeyUsage::DigitalSignature],
+            extended_key_usages: pki_core::ExtendedKeyUsages::new(vec![
+                pki_core::ExtendedKeyUsage::ClientAuth,
+            ])
+            .unwrap(),
+            validity: pki_core::Validity::new(now, now + time::Duration::days(30)).unwrap(),
+            owner_sid: None,
+            crl_distribution_points: Vec::new(),
+        };
+        pki_core::IssuingCa::new(&self.root, &self.key)
+            .unwrap()
+            .issue(
+                request.subject_key(),
+                &profile,
+                &pki_core::SerialNumber::random().unwrap(),
+            )
+            .unwrap()
+            .der()
+            .to_vec()
+    }
+}
+
+/// The stand-in, with Issuing's certificate the test root's.
+fn enrolling(ca: &std::rc::Rc<TestCa>, outcome: &'static str) -> Fake {
+    let mut host = fake();
+    host.authorities[1].certificate = Some(ca.root.clone());
+    let ca = ca.clone();
+    host.respond = Some(Box::new(move |request| match request {
+        Request::Submit { csr, .. } => Reply::Submission(pkid_core::SubmissionInfo {
+            request: 42,
+            outcome: match outcome {
+                "issued" => pkid_core::Outcome::Issued(ca.issue(csr)),
+                _ => pkid_core::Outcome::Pending,
+            },
+            reasons: Vec::new(),
+        }),
+        other => panic!("{other:?}"),
+    }));
+    host
+}
+
+fn passphrase_file() -> PathBuf {
+    let path = scratch("enroll-passphrase");
+    std::fs::write(&path, format!("{PASSPHRASE}\n")).unwrap();
+    path
+}
+
+#[test]
+fn enrolment_writes_the_key_and_chain_as_pkcs12() {
+    let ca = std::rc::Rc::new(TestCa::new());
+    let host = enrolling(&ca, "issued");
+    let out = scratch("device.p12");
+    let line = format!(
+        "enroll Issuing Server --upn jack@home --email jack@home --out {} --passphrase-file {}",
+        out.display(),
+        passphrase_file().display()
+    );
+    let output = running(&host, &line).unwrap();
+    assert_eq!(output.json["status"], "issued");
+    let file = std::fs::read(&out).unwrap();
+    assert_eq!(file[0], 0x30);
+    use std::os::unix::fs::PermissionsExt;
+    assert_eq!(
+        std::fs::metadata(&out).unwrap().permissions().mode() & 0o777,
+        0o600
+    );
+    // The key went nowhere but the file: pkid saw only a request.
+    let Request::Submit { csr, .. } = host.sent() else {
+        panic!()
+    };
+    let request = pki_core::CertificateRequest::from_der(&csr).unwrap();
+    assert_eq!(request.names().len(), 2);
+    assert!(!crate::enroll::tests_pending_path(&out).exists());
+    std::fs::remove_file(out).unwrap();
+}
+
+#[test]
+fn a_held_enrolment_keeps_its_key_sealed_until_collected() {
+    let ca = std::rc::Rc::new(TestCa::new());
+    let host = enrolling(&ca, "pending");
+    let out = scratch("held.p12");
+    let key_path = crate::enroll::tests_pending_path(&out);
+    let _ = std::fs::remove_file(&key_path);
+    let passphrase = passphrase_file();
+    let output = running(
+        &host,
+        &format!(
+            "enroll Issuing Server --dns www.lab.home --out {} --passphrase-file {}",
+            out.display(),
+            passphrase.display()
+        ),
+    )
+    .unwrap();
+    assert_eq!(output.json["status"], "pending");
+    assert!(!out.exists());
+    assert!(
+        output.text.contains("--request 42 --key"),
+        "{}",
+        output.text
+    );
+    let sealed = std::fs::read(&key_path).unwrap();
+    assert_eq!(&sealed[..8], b"PEIOSKEY");
+
+    // While it is still held, nothing is asked for.
+    let mut host = enrolling(&ca, "pending");
+    *host.reply.borrow_mut() = Some(Err(ClientError::Refused(WireError::new(
+        ErrorCode::NotFound,
+        "request 42 has no certificate",
+    ))));
+    host.respond = None;
+    let line = format!(
+        "enroll Issuing --request 42 --key {} --out {}",
+        key_path.display(),
+        out.display()
+    );
+    assert_eq!(running(&host, &line).unwrap_err().kind, Kind::NotFound);
+    assert!(host.prompts.borrow().is_empty());
+    assert!(!out.exists());
+
+    // Once approved, the certificate is collected with the sealed key.
+    let key = pki_keys::open_sealed_key(&sealed, &pki_keys::Passphrase::new(PASSPHRASE)).unwrap();
+    let names = [pki_core::AltName::Dns(
+        pki_core::DnsName::new("www.lab.home").unwrap(),
+    )];
+    let certificate = ca.issue(&pki_core::leaf_request(&key, &names).unwrap());
+    let mut host = enrolling(&ca, "pending");
+    host.respond = Some(Box::new(move |request| match request {
+        Request::CertificateFor { request: 42, .. } => {
+            Reply::Certificate(pkid_core::CertificateInfo {
+                serial: vec![1],
+                request: 42,
+                der: certificate.clone(),
+                not_before: 0,
+                not_after: 0,
+                owner: None,
+                revocation: None,
+            })
+        }
+        other => panic!("{other:?}"),
+    }));
+    let line = format!(
+        "enroll Issuing --request 42 --key {} --out {} --passphrase-file {}",
+        key_path.display(),
+        out.display(),
+        passphrase.display()
+    );
+    running(&host, &line).unwrap();
+    assert_eq!(std::fs::read(&out).unwrap()[0], 0x30);
+
+    // A certificate for another key is refused, and leaves nothing behind.
+    let other = TestCa::new();
+    let stranger = pki_keys::PrivateKey::generate(pki_keys::KeyAlgorithm::EcdsaP256).unwrap();
+    let wrong = other.issue(&pki_core::leaf_request(&stranger, &names).unwrap());
+    let mut host = enrolling(&ca, "pending");
+    host.respond = Some(Box::new(move |_| {
+        Reply::Certificate(pkid_core::CertificateInfo {
+            serial: vec![2],
+            request: 42,
+            der: wrong.clone(),
+            not_before: 0,
+            not_after: 0,
+            owner: None,
+            revocation: None,
+        })
+    }));
+    let again = scratch("held-again.p12");
+    let line = format!(
+        "enroll Issuing --request 42 --key {} --out {} --passphrase-file {}",
+        key_path.display(),
+        again.display(),
+        passphrase.display()
+    );
+    let failure = running(&host, &line).unwrap_err();
+    assert!(failure.hint.is_some(), "{failure:?}");
+    assert!(!again.exists());
+    for path in [out, key_path] {
+        std::fs::remove_file(path).unwrap();
+    }
+}
+
+#[test]
+fn enrolment_needs_a_name_and_collecting_needs_the_key() {
+    let out = scratch("unnamed.p12");
+    let failure = running(
+        &fake(),
+        &format!("enroll Issuing Server --out {}", out.display()),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failure.message,
+        "give at least one of --dns, --email or --upn"
+    );
+    assert!(usage_error(&format!(
+        "enroll Issuing --request 4 --out {}",
+        out.display()
+    ))
+    .starts_with("missing "));
+    assert!(usage_error(&format!(
+        "enroll Issuing Server --request 4 --key k --out {}",
+        out.display()
+    ))
+    .contains("cannot be used with"));
 }

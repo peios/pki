@@ -45,7 +45,10 @@ and the pki tools, and provisions a machine. They link libpeios.
 `pki` is the command, described in [pki(8)](docs/man/pki.8). It manages CAs
 through pkid, which authorizes each request by the caller's own token, and
 asks for the passphrases of sealed keys on the terminal, or reads them from a
-file for a script.
+file for a script. Templates and names it writes to the Registry itself,
+checked by pki-policy's rules first. `pki enroll` makes a key on the
+requester's machine and writes it, with its certificates, as a PKCS #12
+file: pkid sees only the request.
 
 ## Build and test
 
