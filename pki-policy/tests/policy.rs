@@ -3,9 +3,9 @@
 use pki_core::{AltName, CertificateRequest, CommonName, DisplayName, DnsName, Sid};
 use pki_policy::defaults::{device_template, name_root, server_template};
 use pki_policy::{
-    evaluate, leaf_profile, AccessChecker, CommonNameRule, Decision, Issuance, IssueContext,
-    NameNode, NamePolicy, NameTree, Outcome, PolicyError, RegData, SecurityBlob, Template,
-    TreeKind, Values,
+    evaluate, leaf_profile, AccessChecker, Accounts, CommonNameRule, Decision, Issuance,
+    IssueContext, NameNode, NamePolicy, NameTree, NoAccounts, Outcome, PolicyError, RegData,
+    SecurityBlob, Template, TreeKind, Values,
 };
 use time::macros::datetime;
 
@@ -153,7 +153,7 @@ fn upn_request(upn: &str) -> CertificateRequest {
 }
 
 fn decide(request: &CertificateRequest, template: &Template, requester: &Requester) -> Decision {
-    evaluate(request, template, &policy(), requester).unwrap()
+    evaluate(request, template, &policy(), &NoAccounts, requester).unwrap()
 }
 
 #[test]
@@ -225,6 +225,7 @@ fn approval_right_holds_the_request() {
         &dns_request(&["printer.lab.home"]),
         &server(),
         &policy_with(lab),
+        &NoAccounts,
         &requester,
     )
     .unwrap();
@@ -239,12 +240,20 @@ fn non_inheritable_entries_stay_on_their_node() {
     )];
     let policy = policy_with(lab);
     let requester = Requester(vec![LAB_ADMINS, AUTHENTICATED_USERS]);
-    let own = evaluate(&dns_request(&["lab.home"]), &server(), &policy, &requester).unwrap();
+    let own = evaluate(
+        &dns_request(&["lab.home"]),
+        &server(),
+        &policy,
+        &NoAccounts,
+        &requester,
+    )
+    .unwrap();
     assert_eq!(own.outcome, Outcome::Issue, "{own:?}");
     let below = evaluate(
         &dns_request(&["printer.lab.home"]),
         &server(),
         &policy,
+        &NoAccounts,
         &requester,
     )
     .unwrap();
@@ -258,7 +267,14 @@ fn wildcards_need_the_wildcard_right() {
     // Owning lab.home doesn't extend to *.lab.home: PRINCIPAL SELF never
     // applies to wildcards.
     let owner = Requester(vec![LAB_ADMINS, AUTHENTICATED_USERS]);
-    let decision = evaluate(&dns_request(&["*.lab.home"]), &server(), &policy, &owner).unwrap();
+    let decision = evaluate(
+        &dns_request(&["*.lab.home"]),
+        &server(),
+        &policy,
+        &NoAccounts,
+        &owner,
+    )
+    .unwrap();
     assert_eq!(decision.outcome, Outcome::Reject, "{decision:?}");
 
     let granted = vec![(
@@ -269,10 +285,24 @@ fn wildcards_need_the_wildcard_right() {
         ),
     )];
     let policy = policy_with(granted);
-    let without = evaluate(&dns_request(&["*.lab.home"]), &server(), &policy, &owner).unwrap();
+    let without = evaluate(
+        &dns_request(&["*.lab.home"]),
+        &server(),
+        &policy,
+        &NoAccounts,
+        &owner,
+    )
+    .unwrap();
     assert_eq!(without.outcome, Outcome::Reject, "{without:?}");
     let with = Requester::user(RADIUS);
-    let decision = evaluate(&dns_request(&["*.lab.home"]), &server(), &policy, &with).unwrap();
+    let decision = evaluate(
+        &dns_request(&["*.lab.home"]),
+        &server(),
+        &policy,
+        &NoAccounts,
+        &with,
+    )
+    .unwrap();
     assert_eq!(decision.outcome, Outcome::Issue, "{decision:?}");
 }
 
@@ -483,4 +513,84 @@ fn default_templates_parse() {
         .is_some());
     assert_eq!(server().name, "Server");
     assert_eq!(device().name, "Device");
+}
+
+// Principal names owned by their accounts.
+
+const ALICE: &str = "S-1-5-21-1-2-3-1003";
+const BOB: &str = "S-1-5-21-1-2-3-1004";
+
+/// alice and bob, and a directory that can't be reached when asked about
+/// `offline`.
+struct Directory;
+
+impl Accounts for Directory {
+    fn account(&self, name: &str) -> Result<Option<Sid>, String> {
+        match name {
+            "alice" => Ok(Some(Sid::new(ALICE).unwrap())),
+            "bob" => Ok(Some(Sid::new(BOB).unwrap())),
+            "offline" => Err("authd is unavailable".into()),
+            _ => Ok(None),
+        }
+    }
+}
+
+fn with_home() -> NamePolicy {
+    policy().with_principal_domains(vec![pki_core::DnsName::new("home").unwrap()])
+}
+
+fn decide_with(policy: &NamePolicy, upn: &str, requester: &Requester) -> Decision {
+    evaluate(&upn_request(upn), &device(), policy, &Directory, requester).unwrap()
+}
+
+#[test]
+fn an_account_owns_its_principal_name_in_a_listed_domain() {
+    let decision = decide_with(&with_home(), "alice@home", &Requester::user(ALICE));
+    assert_eq!(decision.outcome, Outcome::Issue, "{decision:?}");
+    assert_eq!(decision.owner, Some(Sid::new(ALICE).unwrap()));
+}
+
+#[test]
+fn nobody_obtains_anothers_principal_name() {
+    let decision = decide_with(&with_home(), "alice@home", &Requester::user(BOB));
+    assert_eq!(decision.outcome, Outcome::Reject, "{decision:?}");
+}
+
+#[test]
+fn unlisted_domains_are_never_looked_up() {
+    // Without the domain listed, alice@home has no owner: only an explicit
+    // Owner would make it hers.
+    let unlisted = evaluate(
+        &upn_request("alice@home"),
+        &device(),
+        &policy(),
+        &Directory,
+        &Requester::user(ALICE),
+    )
+    .unwrap();
+    assert_eq!(unlisted.outcome, Outcome::Reject, "{unlisted:?}");
+    let elsewhere = decide_with(&with_home(), "alice@gmail.com", &Requester::user(ALICE));
+    assert_eq!(elsewhere.outcome, Outcome::Reject, "{elsewhere:?}");
+    assert_eq!(elsewhere.owner, None);
+}
+
+#[test]
+fn an_explicit_owner_wins_over_the_directory() {
+    // jack@home is Jack's by its node, whatever the directory says.
+    let decision = decide_with(&with_home(), "jack@home", &Requester::user(JACK));
+    assert_eq!(decision.owner, Some(Sid::new(JACK).unwrap()));
+}
+
+#[test]
+fn an_unreachable_directory_fails_closed() {
+    let decision = decide_with(&with_home(), "offline@home", &Requester::user(ALICE));
+    assert_eq!(decision.outcome, Outcome::Reject, "{decision:?}");
+    assert_eq!(decision.owner, None);
+    assert!(
+        decision
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("authd is unavailable")),
+        "{decision:?}"
+    );
 }

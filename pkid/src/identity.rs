@@ -2,8 +2,11 @@
 
 use std::os::fd::AsFd;
 
+use auth_core::client::ident::Ident;
+use auth_core::ident::{Fields, Key as IdentKey, Kind as IdentKind, Value};
 use peios::access::{AccessCheck, SubjectAccessDecision, SubjectGroup, SuppliedSubject};
 use peios::msgpack::{Reader, Writer};
+use peios::security::SidRef;
 use peios::security::{AccessMask, GenericMapping, SecurityDescriptor};
 use peios::token::Token;
 use pki_core::{DisplayName, Sid};
@@ -228,18 +231,68 @@ impl Principal for Recorded {
     }
 }
 
-/// Identity services on this machine.
+/// Identity services on this machine: authd's identity socket.
 pub struct LocalDirectory;
+
+/// How long pkid waits for authd. A request is decided while pkid's state
+/// is held, so a slow authd mustn't hold every other caller up for long.
+const AUTHD_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
+
+fn ident() -> Ident {
+    Ident::new().with_timeout(AUTHD_TIMEOUT)
+}
+
+impl pki_policy::Accounts for LocalDirectory {
+    /// The principal authd knows by `name`, through its sources in their
+    /// configured order. Account names are set by administrators, and a
+    /// group never answers.
+    fn account(&self, name: &str) -> Result<Option<Sid>, String> {
+        let record = ident()
+            .lookup(
+                IdentKey::Name(name.to_owned()),
+                IdentKind::Principal,
+                Fields::empty(),
+            )
+            .map_err(|failure| failure.to_string())?;
+        let Some(record) = record else {
+            return Ok(None);
+        };
+        if record.kind_found != IdentKind::Principal {
+            return Ok(None);
+        }
+        let sid = SidRef::from_bytes(&record.sid)
+            .ok_or_else(|| "authd answered with a malformed SID".to_string())?;
+        Sid::new(&sid.to_string())
+            .map(Some)
+            .map_err(|error| error.to_string())
+    }
+}
 
 impl Directory for LocalDirectory {
     fn restore(&self, snapshot: &[u8]) -> Result<Box<dyn Principal>, PipelineError> {
         Ok(Box::new(Recorded::decode(snapshot)?))
     }
 
-    /// Not yet available: identity data comes from authd, which pkid
-    /// doesn't consult yet, so templates that name certificates after their
-    /// owner can't issue.
-    fn display_name(&self, _sid: &Sid) -> Result<Option<DisplayName>, PipelineError> {
-        Ok(None)
+    /// The display name authd has for `sid`, never one from a request.
+    fn display_name(&self, sid: &Sid) -> Result<Option<DisplayName>, PipelineError> {
+        let native: peios::security::Sid = sid
+            .as_str()
+            .parse()
+            .map_err(|_| PipelineError::Identity(format!("{} is not a SID", sid.as_str())))?;
+        let record = ident()
+            .lookup(
+                IdentKey::Sid(native.as_bytes().to_vec()),
+                IdentKind::Any,
+                Fields::DISPLAY_NAME,
+            )
+            .map_err(|failure| PipelineError::Identity(failure.to_string()))?;
+        let name = record.and_then(|record| match record.value(Fields::DISPLAY_NAME) {
+            Some(Value::DisplayName(name)) if !name.trim().is_empty() => Some(name.clone()),
+            _ => None,
+        });
+        name.map(|name| {
+            DisplayName::new(&name).map_err(|error| PipelineError::Identity(error.to_string()))
+        })
+        .transpose()
     }
 }

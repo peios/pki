@@ -151,6 +151,11 @@ pki \- manage the Peios certificate authority
 |
 .B \-\-none
 .br
+.B pki name domains
+.RB [ \-\-set
+.IR domain "]... |"
+.B \-\-none
+.br
 .B pki help
 .RI [ command ]
 .SH DESCRIPTION
@@ -500,6 +505,20 @@ the owner of exactly
 .B \-\-none
 leaves it without one.
 Certificates for names a principal owns carry its SID.
+.TP
+.B name domains
+Show the domains whose principal names belong to accounts, or, with
+.BI \-\-set " domain" ,
+repeated for each, replace them.
+.B \-\-none
+lists none.
+A principal name such as
+.B alice@home
+with no owner of its own, in a listed domain, is owned by the account authd knows as
+.BR alice ,
+so that account can request it and its certificates carry the account's SID.
+Only the account's name, which only an administrator can set, is used; groups never own names this way, and a name in a domain not listed is never looked up.
+List only domains this machine speaks for.
 .TP
 .BR help " [\fIcommand\fR]"
 Print help for

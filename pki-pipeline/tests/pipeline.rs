@@ -126,6 +126,12 @@ struct People {
     display_names: HashMap<String, String>,
 }
 
+impl pki_policy::Accounts for People {
+    fn account(&self, _: &str) -> Result<Option<Sid>, String> {
+        Ok(None)
+    }
+}
+
 impl Directory for People {
     fn restore(&self, snapshot: &[u8]) -> Result<Box<dyn Principal>, PipelineError> {
         let text = std::str::from_utf8(snapshot).unwrap();

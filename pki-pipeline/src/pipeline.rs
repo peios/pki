@@ -80,6 +80,7 @@ impl<'a> Pipeline<'a> {
             &request,
             definition,
             &self.configuration.names,
+            self.directory,
             requester.checker(),
         )?;
         let new = NewRequest {
@@ -151,6 +152,7 @@ impl<'a> Pipeline<'a> {
             &request,
             definition,
             &self.configuration.names,
+            self.directory,
             requester.checker(),
         )?;
         if decision.outcome == Outcome::Reject {

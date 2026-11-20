@@ -40,6 +40,22 @@ the names below it, and certificates for the name carry the owner's SID.
 Never make a broad group, such as Users, an owner: every member could then
 request certificates for the name. `pki` warns if you do.
 
+## Let every account request its own principal name
+
+Rather than set an owner for each person's principal name, let the accounts
+on this machine own theirs. List the domains this machine speaks for:
+
+```sh
+pki name domains --set home
+```
+
+Now `alice@home`, with no owner of its own, belongs to the account `alice`:
+Alice can request certificates for it, such as for signing in to Wi-Fi, and
+they carry her account's SID. Nobody else can request it, as PRINCIPAL SELF
+matches only its owner. Only the account's name is used, which only an
+administrator can change, and a domain not listed is never looked up, so
+list only your own. An owner you set with `set-owner` still wins.
+
 ## Let a group request names under a domain
 
 Give `lab.home` a descriptor that grants the group Request with approval
