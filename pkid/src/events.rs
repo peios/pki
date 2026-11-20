@@ -7,6 +7,8 @@
 use peios::event::{EventPolicy, Tier};
 use peios::msgpack::Writer;
 
+use pkid_core::SERVICE_SID;
+
 use crate::dispatch::{Audit, Event};
 
 /// Emits pkid's events to eventd.
@@ -103,6 +105,33 @@ impl Audit for EventLog {
                         .write_bin(&serial)
                         .write_str("reason")
                         .write_uint(u64::from(reason));
+                })
+            }),
+            Event::CrlPublished {
+                ca,
+                number,
+                next_update,
+                officer,
+            } => {
+                // On pkid's own schedule, the subject is pkid.
+                let subject = officer.as_ref().map_or(SERVICE_SID, |sid| sid.as_str());
+                emit("pkid.crl.published", |writer| {
+                    header(writer, subject, &ca, 2, |writer| {
+                        writer
+                            .write_str("number")
+                            .write_uint(number)
+                            .write_str("next_update")
+                            .write_int(next_update);
+                    })
+                })
+            }
+            // `next_update` is absent when the CA has no CRL at all.
+            Event::CrlExpiring { ca, next_update } => emit("pkid.crl.expiring", |writer| {
+                let extra = u32::from(next_update.is_some());
+                header(writer, SERVICE_SID, &ca, extra, |writer| {
+                    if let Some(time) = next_update {
+                        writer.write_str("next_update").write_int(time);
+                    }
                 })
             }),
         }

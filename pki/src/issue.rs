@@ -507,16 +507,30 @@ pub fn cert(host: &dyn Host, command: Cert) -> Result<Output, Failure> {
             match call(
                 host,
                 &Request::Revoke {
-                    ca: authority.id,
+                    ca: authority.id.clone(),
                     serial: number.clone(),
                     reason: code,
                 },
                 &what,
             )? {
-                Reply::Done => Ok(Output {
-                    json: json!({"revoked": show::hex(&number), "reason": reason}),
-                    text: format!("Revoked certificate {}.\n", show::hex(&number)),
-                }),
+                Reply::Done => {
+                    let mut text = format!("Revoked certificate {}.\n", show::hex(&number));
+                    // pkid publishes a new CRL at once only with a key it keeps.
+                    if !authority.key_available {
+                        text.push_str(&format!(
+                            "CA {}'s key isn't available to pkid, so its CRL won't list this until you run:\n  pki ca publish-crl {}\n",
+                            authority.name, authority.id
+                        ));
+                    }
+                    Ok(Output {
+                        json: json!({
+                            "revoked": show::hex(&number),
+                            "reason": reason,
+                            "crl_published": authority.key_available,
+                        }),
+                        text,
+                    })
+                }
                 other => Err(unexpected(&other, &what)),
             }
         }

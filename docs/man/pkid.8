@@ -50,6 +50,21 @@ each operation that signs with it takes the passphrase in the same request, and
 .B pkid
 forgets the key when the operation ends.
 .PP
+Each CA publishes a certificate revocation list (CRL), which software that checks revocation reads from the address in the CA's certificates.
+.B pkid
+signs a new CRL for a CA whose key it keeps after every revocation and at half each CRL's lifetime, 7 days by default, checking each minute.
+A CA whose key is in a sealed file can't sign unattended: its CRLs last 180 days by default, an officer replaces them with
+.BR "pki ca publish\-crl" ,
+and
+.B pkid
+warns from 30 days before one expires.
+.B pkid
+writes each CRL under
+.IR /var/state/pki/http ,
+at the path of each of the CA's http distribution points, where
+.BR pki\-httpd (8)
+serves it.
+.PP
 Configuration changes apply without a restart.
 .B pkid
 watches its Registry subtree and rereads it whenever it changes, and every 60 seconds while it cannot watch it.
@@ -99,7 +114,7 @@ Without it, a caller sees only the requests it submitted and the certificates fo
 Submit certificate requests.
 .TP
 .B Officer (0x4)
-Approve and deny held requests, and revoke certificates.
+Approve and deny held requests, revoke certificates, and publish CRLs.
 An officer can never approve a request it submitted itself.
 .TP
 .B Manage (0x8)
@@ -144,6 +159,13 @@ The control socket.
 The CA database: every request, certificate, decision and revocation, with who made each.
 It holds nothing secret.
 .TP
+.I /var/state/pki/http
+The CRLs
+.B pkid
+publishes, which
+.BR pki\-httpd (8)
+may read.
+.TP
 .I /var/state/pki/keys
 The keys of CAs kept in
 .BR pkid 's
@@ -161,6 +183,8 @@ pkid.request.approved
 pkid.request.denied
 pkid.authority.changed
 pkid.certificate.revoked
+pkid.crl.published
+pkid.crl.expiring
 .fi
 .PP
 Each is documented in
@@ -182,6 +206,7 @@ tells peinit it is ready once its socket is listening, even while its configurat
 .BR evman (1),
 .BR regman (1),
 .BR authd (8),
-.BR pki (8)
+.BR pki (8),
+.BR pki\-httpd (8)
 .PP
 https://learn.peios.org/peios/using-peios/certificate-authority/overview

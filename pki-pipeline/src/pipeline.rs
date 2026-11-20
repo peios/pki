@@ -1,12 +1,14 @@
-use pki_core::{CertificateRequest, IssuingCa, RevocationReason, SerialNumber};
+use pki_core::{
+    CertificateRequest, CrlProfile, IssuingCa, RevocationReason, RevokedCertificate, SerialNumber,
+};
 use pki_policy::{
     evaluate, leaf_profile, CommonNameRule, Decision, IssueContext, Outcome, Template,
 };
 use pki_store::{
-    Certificate, CertificateFilter, NewCertificate, NewRequest, Request, RequestFilter, RequestId,
-    RequestStatus, Revocation, Store, StoreError,
+    Certificate, CertificateFilter, Crl, NewCertificate, NewRequest, Request, RequestFilter,
+    RequestId, RequestStatus, Revocation, Store, StoreError,
 };
-use time::OffsetDateTime;
+use time::{Duration, OffsetDateTime};
 
 use crate::authority::{Authority, Configuration, Directory, Principal};
 use crate::{PipelineError, CA_OFFICER, CA_READ, CA_REQUEST};
@@ -197,6 +199,66 @@ impl<'a> Pipeline<'a> {
         };
         self.store.revoke(&ca.id, serial, &revocation)?;
         Ok(())
+    }
+
+    /// Signs a CRL for `ca`, valid from `now` for `lifetime`, listing every
+    /// certificate it has revoked that hasn't expired, and records it as
+    /// the CA's latest. No one's rights are checked: pkid's own schedule
+    /// calls this, and officers reach it through [`Pipeline::publish_crl`].
+    pub fn issue_crl(
+        &mut self,
+        ca: &Authority<'_>,
+        now: OffsetDateTime,
+        lifetime: Duration,
+    ) -> Result<Crl, PipelineError> {
+        let signer = ca.signer.ok_or(PipelineError::KeyUnavailable)?;
+        let issuing = IssuingCa::new(&ca.certificate, signer)
+            .map_err(|error| PipelineError::Configuration(error.to_string()))?;
+        // Whole seconds, as the CRL encodes its times.
+        let now = now.replace_nanosecond(0).unwrap_or(now);
+        let number = self.store.crl(&ca.id)?.map_or(1, |crl| crl.number + 1);
+        let revoked = self
+            .store
+            .revoked(&ca.id, now)?
+            .into_iter()
+            .map(|(serial, revocation)| RevokedCertificate {
+                serial,
+                revoked_at: revocation.revoked,
+                // RFC 5280 §5.3.1: an unspecified reason is left out.
+                reason: match revocation.reason {
+                    RevocationReason::Unspecified => None,
+                    reason => Some(reason),
+                },
+            })
+            .collect();
+        let profile = CrlProfile {
+            this_update: now,
+            next_update: now + lifetime,
+            number,
+            revoked,
+        };
+        let list = issuing.sign_crl(&profile).map_err(PipelineError::Issue)?;
+        let crl = Crl {
+            number,
+            this_update: profile.this_update,
+            next_update: profile.next_update,
+            der: list.der().to_vec(),
+        };
+        self.store.record_crl(&ca.id, &crl)?;
+        Ok(crl)
+    }
+
+    /// An officer's request for a new CRL now, such as after revoking with
+    /// a CA whose key pkid can't use unattended.
+    pub fn publish_crl(
+        &mut self,
+        ca: &Authority<'_>,
+        officer: &dyn Principal,
+        now: OffsetDateTime,
+        lifetime: Duration,
+    ) -> Result<Crl, PipelineError> {
+        require(officer, ca, CA_OFFICER)?;
+        self.issue_crl(ca, now, lifetime)
     }
 
     /// A request to the CA. Callers without Read see only their own;

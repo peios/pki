@@ -43,6 +43,27 @@ pub struct AuthorityConfig {
     /// The GUIDs of the templates it issues from.
     pub templates: Vec<String>,
     pub crl_distribution_points: Vec<String>,
+    /// How long each CRL it signs is valid, in days.
+    pub crl_lifetime_days: u32,
+}
+
+/// The default CRL lifetime of a CA whose key pkid keeps, and so re-signs
+/// unattended.
+pub const CRL_LIFETIME_DAYS: u32 = 7;
+/// The default CRL lifetime of a CA whose key is in a sealed file, such as
+/// an offline root, whose CRLs are re-signed only when an administrator
+/// brings its passphrase.
+pub const SEALED_CRL_LIFETIME_DAYS: u32 = 180;
+/// The longest CRL lifetime.
+pub const MAX_CRL_LIFETIME_DAYS: u32 = 3650;
+
+/// The CRL lifetime of a CA with `key`, unless its record sets one.
+pub fn default_crl_lifetime(key: &KeyReference) -> u32 {
+    if key.provider() == "file" {
+        SEALED_CRL_LIFETIME_DAYS
+    } else {
+        CRL_LIFETIME_DAYS
+    }
 }
 
 /// A configuration pkid can serve.
@@ -180,12 +201,21 @@ fn authority(
         name: name.to_string(),
         certificate: certificate.map(<[u8]>::to_vec),
         request: request.map(<[u8]>::to_vec),
-        key,
         security,
         templates: optional_list("Templates")?
             .into_iter()
             .map(|template| template.to_ascii_lowercase())
             .collect(),
         crl_distribution_points: optional_list("CrlDistributionPoints")?,
+        crl_lifetime_days: match values.dword("CrlLifetimeDays").map_err(wrap)? {
+            Some(days) if (1..=MAX_CRL_LIFETIME_DAYS).contains(&days) => days,
+            Some(_) => {
+                return Err(ConfigError(format!(
+                    "CrlLifetimeDays must be 1 to {MAX_CRL_LIFETIME_DAYS}"
+                )))
+            }
+            None => default_crl_lifetime(&key),
+        },
+        key,
     })
 }

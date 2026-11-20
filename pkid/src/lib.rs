@@ -9,6 +9,7 @@
 //! socket.
 
 pub mod config;
+pub mod crl;
 pub mod dispatch;
 pub mod events;
 pub mod identity;

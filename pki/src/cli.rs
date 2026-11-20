@@ -134,6 +134,15 @@ pub enum Ca {
     },
     /// Change which templates a CA issues and where its CRL is published
     Set(Set),
+    /// Sign and publish a new CRL now
+    PublishCrl {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// Read the CA key's passphrase from a file
+        #[arg(long, value_name = "file")]
+        passphrase_file: Option<PathBuf>,
+    },
 }
 
 #[derive(Debug, Subcommand)]
@@ -600,6 +609,9 @@ pub struct Set {
     /// Publish no CRL distribution points
     #[arg(long)]
     pub no_crls: bool,
+    /// Set how long each CRL is valid, in days
+    #[arg(long, value_name = "days")]
+    pub crl_lifetime: Option<u32>,
 }
 
 /// pki's command tree, with every command given the help layout.

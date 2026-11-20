@@ -42,6 +42,11 @@ one takes its passphrase.
 window use. `pki-management` reads pki's Registry configuration, for pkid
 and the pki tools, and provisions a machine. They link libpeios.
 
+Each CA publishes CRLs: pkid signs them on a schedule, after revocations,
+or at an officer's request, and writes them under `/var/state/pki/http`.
+`pki-httpd` serves that folder, read-only, over HTTP at the CAs'
+distribution points; it holds no keys and can't reach pkid.
+
 `pki` is the command, described in [pki(8)](docs/man/pki.8). It manages CAs
 through pkid, which authorizes each request by the caller's own token, and
 asks for the passphrases of sealed keys on the terminal, or reads them from a
@@ -53,11 +58,11 @@ file: pkid sees only the request.
 ## Build and test
 
 ```sh
-pekit test -j 2 unit policy keys store pipeline wire client daemon management cli clippy doctests
-pekit build -j 2 pkid pki
+pekit test -j 2 unit policy keys store pipeline wire client daemon management cli httpd clippy doctests
+pekit build -j 2 pkid pki pki_httpd
 ```
 
-`wire`, `client`, `daemon`, `management` and `cli` test the crates that link libpeios, which pekit
+`wire`, `client`, `daemon`, `management`, `cli` and `httpd` test the crates that link libpeios, which pekit
 builds from the SDK at the commit `pekit.lock` pins. They run on any Linux
 host; what needs a Peios kernel, the access checks, the socket's identity
 and the key store's descriptors, is qualified in a Peios guest. Cargo builds only the portable

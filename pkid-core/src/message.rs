@@ -151,6 +151,14 @@ pub enum Request {
         ca: String,
         templates: Option<Vec<String>>,
         crl_distribution_points: Option<Vec<String>>,
+        /// How long each of its CRLs is valid, in days.
+        crl_lifetime_days: Option<u32>,
+    },
+    /// Signs and publishes a new CRL for `ca` now, with the passphrase its
+    /// key needs, if any.
+    PublishCrl {
+        ca: String,
+        passphrase: Option<Passphrase>,
     },
 }
 
@@ -174,6 +182,7 @@ impl Request {
             Self::ImportAuthority { .. } => "import-authority",
             Self::ExportKey { .. } => "export-key",
             Self::ConfigureAuthority { .. } => "configure-authority",
+            Self::PublishCrl { .. } => "publish-crl",
         }
     }
 
@@ -247,13 +256,19 @@ impl Request {
                 ca,
                 templates,
                 crl_distribution_points,
+                crl_lifetime_days,
             } => {
                 map.str("ca", ca)
                     .opt_strings("templates", templates.as_deref())
                     .opt_strings(
                         "crl-distribution-points",
                         crl_distribution_points.as_deref(),
-                    );
+                    )
+                    .opt_uint("crl-lifetime-days", crl_lifetime_days.map(u64::from));
+            }
+            Self::PublishCrl { ca, passphrase } => {
+                map.str("ca", ca)
+                    .opt_bin("passphrase", passphrase.as_ref().map(Passphrase::expose));
             }
             Self::Submit { ca, template, csr } => {
                 map.str("ca", ca).str("template", template).bin("csr", csr);
@@ -364,6 +379,16 @@ impl Request {
                 ca: ca()?,
                 templates: fields.opt_strings("templates")?,
                 crl_distribution_points: fields.opt_strings("crl-distribution-points")?,
+                crl_lifetime_days: fields
+                    .opt_uint("crl-lifetime-days")?
+                    .map(|days| {
+                        u32::try_from(days).map_err(|_| malformed("CRL lifetime out of range"))
+                    })
+                    .transpose()?,
+            },
+            "publish-crl" => Self::PublishCrl {
+                ca: ca()?,
+                passphrase: passphrase("passphrase")?,
             },
             "submit" => Self::Submit {
                 ca: ca()?,
@@ -446,6 +471,20 @@ pub struct AuthorityInfo {
     pub templates: Vec<TemplateInfo>,
     /// Whether pkid can sign with the CA's key unattended.
     pub key_available: bool,
+    /// How long each of its CRLs is valid, in days.
+    pub crl_lifetime_days: u32,
+    /// Its latest CRL, if it has signed one.
+    pub crl: Option<CrlInfo>,
+}
+
+/// A CRL a CA signed. Times are Unix seconds.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CrlInfo {
+    pub number: u64,
+    pub this_update: i64,
+    /// When it expires: software that checks revocation rejects the CA's
+    /// certificates once it passes without a newer CRL.
+    pub next_update: i64,
 }
 
 /// A passphrase in transit. Its bytes are wiped when it is dropped, and it
@@ -651,6 +690,8 @@ pub enum Reply {
     Signed(Vec<u8>),
     /// A key file sealed under the passphrase the export gave.
     SealedKey(Vec<u8>),
+    /// The CRL a CA just signed and published.
+    Crl(CrlInfo),
 }
 
 impl Reply {
@@ -666,6 +707,7 @@ impl Reply {
             Self::Authority(_) => "authority",
             Self::Signed(_) => "signed",
             Self::SealedKey(_) => "sealed-key",
+            Self::Crl(_) => "crl",
         }
     }
 
@@ -735,6 +777,9 @@ impl Reply {
             Reply::SealedKey(sealed) => {
                 map.bin("sealed-key", sealed);
             }
+            Reply::Crl(crl) => {
+                map.raw("crl", &encode_crl(crl)?);
+            }
         }
         map.finish()
     }
@@ -777,6 +822,7 @@ impl Reply {
             "authority" => Reply::Authority(decode_authority_fields(&fields.map("authority")?)?),
             "signed" => Reply::Signed(fields.bin("certificate")?.to_vec()),
             "sealed-key" => Reply::SealedKey(fields.bin("sealed-key")?.to_vec()),
+            "crl" => Reply::Crl(decode_crl(&fields.map("crl")?)?),
             other => return Err(malformed(format!("reply kind {other}"))),
         };
         Ok(Ok(reply))
@@ -851,15 +897,35 @@ fn encode_authority(authority: &AuthorityInfo) -> Result<Vec<u8>, CodecError> {
                 .finish()
         })
         .collect::<Result<Vec<_>, _>>()?;
-    MapWriter::new()
-        .str("id", &authority.id)
+    let mut map = MapWriter::new();
+    map.str("id", &authority.id)
         .str("name", &authority.name)
         .opt_bin("certificate", authority.certificate.as_deref())
         .opt_bin("request", authority.request.as_deref())
         .str("key", &authority.key)
         .array("templates", &templates)
         .bool("key-available", authority.key_available)
+        .uint("crl-lifetime-days", u64::from(authority.crl_lifetime_days));
+    if let Some(crl) = &authority.crl {
+        map.raw("crl", &encode_crl(crl)?);
+    }
+    map.finish()
+}
+
+fn encode_crl(crl: &CrlInfo) -> Result<Vec<u8>, CodecError> {
+    MapWriter::new()
+        .uint("number", crl.number)
+        .int("this-update", crl.this_update)
+        .int("next-update", crl.next_update)
         .finish()
+}
+
+fn decode_crl(fields: &Fields<'_>) -> Result<CrlInfo, CodecError> {
+    Ok(CrlInfo {
+        number: fields.uint("number")?,
+        this_update: fields.int("this-update")?,
+        next_update: fields.int("next-update")?,
+    })
 }
 
 fn decode_authority(bytes: &[u8]) -> Result<AuthorityInfo, CodecError> {
@@ -881,6 +947,12 @@ fn decode_authority_fields(fields: &Fields<'_>) -> Result<AuthorityInfo, CodecEr
             })
         })?,
         key_available: fields.bool("key-available")?,
+        crl_lifetime_days: u32::try_from(fields.uint("crl-lifetime-days")?)
+            .map_err(|_| malformed("CRL lifetime out of range"))?,
+        crl: fields
+            .opt_map("crl")?
+            .map(|crl| decode_crl(&crl))
+            .transpose()?,
     })
 }
 

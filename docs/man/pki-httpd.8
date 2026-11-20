@@ -1,0 +1,119 @@
+.TH PKI\-HTTPD 8 2026-11-19 "Peios pki 0.1.0"
+.SH NAME
+pki\-httpd \- serve the CRLs the Peios certificate authority publishes over HTTP
+.SH SYNOPSIS
+.B pki\-httpd
+.br
+.B pki\-httpd
+.RB [ \-h | \-\-help | \-V | \-\-version ]
+.SH DESCRIPTION
+.B pki\-httpd
+serves the certificate revocation lists (CRLs) that
+.BR pkid (8)
+publishes, so that software checking revocation can fetch each one from the address its CA's certificates name.
+.PP
+peinit starts
+.B pki\-httpd
+as the
+.B pki\-httpd
+service, under its own virtual service account; you do not run it yourself.
+It refuses to start under any other identity.
+It holds no keys and cannot reach
+.BR pkid :
+it only reads the folder
+.B pkid
+publishes to, so a fault in it exposes nothing but the CRLs, which are public.
+.PP
+.B pkid
+writes each CRL under
+.I /var/state/pki/http
+at the path of each of its CA's http distribution points, and
+.B pki\-httpd
+serves that path: the CRL for
+.B http://pki.home/crl/issuing.crl
+is served as
+.BR /crl/issuing.crl ,
+whichever host name the request used.
+.PP
+It answers one GET or HEAD request per connection and then closes it.
+A path is served only if every segment is letters, digits,
+.BR . ,
+.BR _ ,
+.B \-
+or
+.BR ~ ,
+not starting with
+.BR . ,
+and names a regular file; anything else is not found.
+A query is ignored.
+Any other method is refused, as is a request whose head exceeds 8 KiB, or that takes more than 10 seconds.
+At most 64 connections are served at once; more are closed straight away.
+CRLs are served as
+.BR application/pkix\-crl .
+.SH OPTIONS
+.B pki\-httpd
+takes no options when it serves.
+.TP
+.BR \-h ", " \-\-help
+Print help and exit.
+.TP
+.BR \-V ", " \-\-version
+Print the program name and version and exit.
+.SH CONFIGURATION
+.B pki\-httpd
+listens on every address, on the TCP port
+.B Machine\eSoftware\ePki\eHttp Port
+sets, 80 by default, read when it starts.
+Binding the port needs a reservation granting it, which
+.B pki setup
+adds; see
+.BR pki (8).
+Run
+.B regman Machine\eSoftware\ePki\eHttp
+for the value.
+.SH SECURITY
+The service account may read
+.I /var/state/pki/http
+and
+.BR Machine\eSoftware\ePki\eHttp ,
+and bind its port, and nothing else
+.B pki setup
+grants it.
+.SH EXIT STATUS
+.TP
+.B 0
+Help or the version was printed, or the listener closed.
+.TP
+.B 1
+.B pki\-httpd
+could not start: it runs under the wrong identity, its port setting is not valid, or it cannot listen on the port.
+.TP
+.B 2
+Usage error: an argument was given.
+.SH FILES
+.TP
+.I /var/state/pki/http
+The CRLs served.
+.SH NOTES
+.BR pki\-httpd 's
+service runs under its own virtual service account, whose token
+.BR authd (8)
+makes, so the service requires
+.BR authd .
+The account needs SeChangeNotifyPrivilege, read access to
+.I /var/state/pki/http
+and
+.BR Machine\eSoftware\ePki\eHttp ,
+and the reservation of its port, all of which
+.B pki setup
+gives it.
+.SH READINESS
+.B pki\-httpd
+tells peinit it is ready once it is listening.
+.SH SEE ALSO
+.BR regman (1),
+.BR authd (8),
+.BR pki (8),
+.BR pkid (8)
+.PP
+https://learn.peios.org/peios/using-peios/certificate-authority/overview

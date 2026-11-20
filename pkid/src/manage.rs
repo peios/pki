@@ -23,7 +23,7 @@ use pki_store::{NewCertificate, NewRequest};
 use pkid_core::{ErrorCode, Issuer, KeySpec, Reply, Request, WireError};
 use time::{Duration, OffsetDateTime};
 
-use crate::config::{AuthorityConfig, Loaded};
+use crate::config::{AuthorityConfig, Loaded, MAX_CRL_LIFETIME_DAYS};
 use crate::dispatch::{authority_info, key_error, Event, Services, State};
 
 /// How far before now a CA certificate becomes valid, so verifiers with
@@ -213,7 +213,7 @@ fn ca_profile(
 
 /// The signer of a CA on this pkid, opened for this operation alone: a
 /// service key as it is, a sealed key with `passphrase`.
-fn signer_of(
+pub(crate) fn signer_of(
     config: &AuthorityConfig,
     passphrase: Option<&pkid_core::Passphrase>,
     services: &Services<'_>,
@@ -396,6 +396,7 @@ fn commit(
     Ok(Reply::Authority(authority_info(
         loaded,
         &state.keys,
+        state.store.as_ref().ok(),
         config,
     )))
 }
@@ -666,6 +667,7 @@ pub fn handle(
             ca,
             templates,
             crl_distribution_points,
+            crl_lifetime_days,
         } => {
             let config = configured(state, &ca)?.clone();
             require(caller, &config.security, CA_MANAGE)?;
@@ -673,7 +675,7 @@ pub fn handle(
                 Some(templates) => check_templates(state, &templates)?,
                 None => config.templates.clone(),
             };
-            let values = record(
+            let mut values = record(
                 &config.name,
                 &config.key,
                 config.certificate.as_deref(),
@@ -683,6 +685,14 @@ pub fn handle(
                     .as_deref()
                     .unwrap_or(&config.crl_distribution_points),
             );
+            if let Some(days) = crl_lifetime_days {
+                if !(1..=MAX_CRL_LIFETIME_DAYS).contains(&days) {
+                    return Err(bad(format!(
+                        "a CRL lifetime is 1 to {MAX_CRL_LIFETIME_DAYS} days"
+                    )));
+                }
+                values.insert("CrlLifetimeDays", RegData::Dword(days));
+            }
             let change = Change {
                 id: &ca,
                 values,

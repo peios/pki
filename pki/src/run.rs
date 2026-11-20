@@ -3,6 +3,7 @@
 use std::path::Path;
 
 use pki_keys::{KeyError, NewPassphrase};
+use pki_management::provision::Reservation;
 use pkid_core::{AuthorityInfo, Issuer, KeySpec, Passphrase, Reply, Request};
 use serde_json::json;
 use zeroize::Zeroizing;
@@ -47,11 +48,33 @@ fn setup(host: &dyn Host) -> Result<Output, Failure> {
     if seeded.authorities_key {
         text.push_str("Let pkid record the CAs created through it.\n");
     }
+    if seeded.http_key {
+        text.push_str("Let pki-httpd read its settings.\n");
+    }
+    match seeded.port {
+        Reservation::Added(port) => {
+            text.push_str(&format!("Reserved TCP port {port} for pki-httpd.\n"));
+        }
+        Reservation::Present => {}
+        Reservation::Taken(port) => host.warn(&format!(
+            "TCP port {port} is reserved for another service, so pki-httpd can't serve CRLs on it; set Machine\\Software\\Pki\\Http Port to another port, then run pki setup again"
+        )),
+        Reservation::NoTable => host.warn(
+            "this machine has no port reservation table, so pki-httpd may be unable to bind its port",
+        ),
+    }
     Ok(Output {
         json: json!({
             "templates_added": seeded.templates,
             "name_roots_added": seeded.name_roots,
             "authorities_key_added": seeded.authorities_key,
+            "http_key_added": seeded.http_key,
+            "port_reservation": match seeded.port {
+                Reservation::Added(port) => json!({"added": port}),
+                Reservation::Present => json!("present"),
+                Reservation::Taken(port) => json!({"taken": port}),
+                Reservation::NoTable => json!("no-table"),
+            },
         }),
         text,
     })
@@ -121,7 +144,7 @@ fn resolve_templates(host: &dyn Host, names: &[String]) -> Result<Vec<String>, F
 
 /// Whether using `authority`'s key takes a passphrase: a sealed file key
 /// is never kept open, so every use does.
-fn sealed(authority: &AuthorityInfo) -> bool {
+pub fn sealed(authority: &AuthorityInfo) -> bool {
     authority.key.starts_with("file:")
 }
 
@@ -222,10 +245,11 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
                             a.name.clone(),
                             a.id.clone(),
                             show::state(a).replace('-', " "),
+                            show::crl_until(a),
                         ]
                     })
                     .collect();
-                show::table(&["NAME", "ID", "STATE"], &rows)
+                show::table(&["NAME", "ID", "STATE", "CRL UNTIL"], &rows)
             };
             Ok(Output {
                 json: json!({"authorities": all.iter().map(show::authority_json).collect::<Vec<_>>()}),
@@ -519,7 +543,7 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
             } else {
                 Some(set.crls.clone())
             };
-            if templates.is_none() && crls.is_none() {
+            if templates.is_none() && crls.is_none() && set.crl_lifetime.is_none() {
                 return Err(Failure::usage(format!("{what}: nothing to change")));
             }
             let authority = resolve_ca(host, &set.ca)?;
@@ -532,12 +556,55 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
                     ca: authority.id,
                     templates,
                     crl_distribution_points: crls,
+                    crl_lifetime_days: set.crl_lifetime,
                 },
                 &what,
             )?;
             Ok(Output {
                 text: show::authority_text(&authority),
                 json: json!({"changed": show::authority_json(&authority)}),
+            })
+        }
+
+        Ca::PublishCrl {
+            ca,
+            passphrase_file,
+        } => {
+            let what = format!("publish-crl {ca}");
+            let authority = resolve_ca(host, &ca)?;
+            let passphrase = if sealed(&authority) {
+                Some(existing_passphrase(
+                    host,
+                    passphrase_file.as_deref(),
+                    &format!("Passphrase for the key of CA {}: ", authority.name),
+                )?)
+            } else {
+                None
+            };
+            let reply = call(
+                host,
+                &Request::PublishCrl {
+                    ca: authority.id.clone(),
+                    passphrase,
+                },
+                &what,
+            )?;
+            let Reply::Crl(crl) = reply else {
+                return Err(unexpected(&reply, &what));
+            };
+            Ok(Output {
+                text: format!(
+                    "Published CRL {} of CA {}, valid until {}.\n",
+                    crl.number,
+                    authority.name,
+                    show::time(crl.next_update)
+                ),
+                json: json!({
+                    "ca": authority.id,
+                    "number": crl.number,
+                    "this_update": show::time(crl.this_update),
+                    "next_update": show::time(crl.next_update),
+                }),
             })
         }
     }

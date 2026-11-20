@@ -6,6 +6,7 @@
 //! `pkid.regman`). It writes only its CA records; templates, names and
 //! provisioning are an administrator's, through this crate.
 
+pub mod http;
 pub mod names;
 pub mod provision;
 pub mod registry;
@@ -26,6 +27,8 @@ pub const STATE_DIR: &str = "/var/state/pki";
 pub const DATABASE: &str = "/var/state/pki/pkid.db";
 /// Online CA keys, readable by pkid's service identity alone.
 pub const KEYS_DIR: &str = "/var/state/pki/keys";
+/// The CRLs pkid publishes, at the URL paths pki-httpd serves them on.
+pub const HTTP_DIR: &str = "/var/state/pki/http";
 
 /// The Registry under [`ROOT`], read in one snapshot.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

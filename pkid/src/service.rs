@@ -13,15 +13,20 @@ use pki_pipeline::DEFAULT_CA_SDDL;
 use pki_policy::SecurityBlob;
 use pki_store::Store;
 use pkid_core::SERVICE_SID;
+use time::OffsetDateTime;
 
 use crate::config::{Defaults, DEFAULT_MANAGE_SDDL};
+use crate::crl::{self, HttpFolder, Publication, Publisher};
 use crate::dispatch::{apply, Configurator, Services, State};
 use crate::events::EventLog;
 use crate::identity::LocalDirectory;
 use crate::keystore::ServiceKeyFiles;
 use crate::registry::{self, RegistryConfigurator};
 
-pub use pki_management::{DATABASE, KEYS_DIR, STATE_DIR};
+pub use pki_management::{DATABASE, HTTP_DIR, KEYS_DIR, STATE_DIR};
+
+/// How often pkid checks whether a CRL is due.
+const CRL_CHECK: Duration = Duration::from_secs(60);
 
 /// How often pkid re-reads its configuration while it can't watch it.
 const REVALIDATE: Duration = Duration::from_secs(60);
@@ -63,6 +68,7 @@ pub fn providers() -> KeyProviders {
 pub struct Runtime {
     pub providers: KeyProviders,
     pub defaults: Defaults,
+    pub publishers: Vec<Box<dyn Publisher>>,
 }
 
 impl Runtime {
@@ -70,6 +76,7 @@ impl Runtime {
         Self {
             providers: providers(),
             defaults: defaults(),
+            publishers: vec![Box::new(HttpFolder::new(Path::new(HTTP_DIR)))],
         }
     }
 
@@ -81,6 +88,7 @@ impl Runtime {
             configurator: &RegistryConfigurator,
             providers: &self.providers,
             defaults: &self.defaults,
+            publishers: &self.publishers,
         }
     }
 }
@@ -102,6 +110,7 @@ pub fn start(runtime: &Runtime) -> Arc<Mutex<State>> {
         loaded: Err("not loaded yet".into()),
         keys: HashMap::new(),
         source: None,
+        publication: Publication::default(),
     }));
     refresh(&state, runtime);
     state
@@ -150,6 +159,18 @@ pub fn watch(state: Arc<Mutex<State>>, runtime: Arc<Runtime>) {
         }
         std::thread::sleep(REVALIDATE);
         refresh(&state, &runtime);
+    }
+}
+
+/// Keeps every CA's CRL current: checks each minute, and so signs a due
+/// CRL within a minute of its time, and publishes again what didn't reach
+/// every publisher.
+pub fn maintain_crls(state: Arc<Mutex<State>>, runtime: Arc<Runtime>) {
+    loop {
+        if let Ok(mut state) = state.lock() {
+            crl::maintain(&mut state, &runtime.services(), OffsetDateTime::now_utc());
+        }
+        std::thread::sleep(CRL_CHECK);
     }
 }
 

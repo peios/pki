@@ -328,3 +328,47 @@ applies: new certificates
 
 Where certificates from this CA say its revocation list is published. Use a
 host name that will outlive this machine.
+
+pkid publishes each CRL at the path of every http URL here, which
+pki-httpd serves: http://pki.home/crl/issuing.crl is served as
+/crl/issuing.crl. A path is published only if each of its segments is
+letters, digits, `.`, `_`, `-` or `~`, doesn't start with `.`, and it
+carries no query.
+
+--- machine\software\pki\authorities\<id> crllifetimedays
+canonical: Machine\Software\Pki\Authorities\<id> CrlLifetimeDays
+type: REG_DWORD
+default: 7, or 180 for a CA whose key is in a sealed file
+valid: 1–3650
+applies: the CA's next CRL
+
+How long each CRL the CA signs is valid. Software that checks revocation
+rejects every certificate below the CA once its latest CRL expires, so a
+CRL has to be replaced before then.
+
+pkid replaces the CRL of a CA whose key it keeps at half this lifetime,
+and at once after each revocation. A CA whose key is in a sealed file can't
+sign unattended: an officer replaces its CRL with `pki ca publish-crl`, and
+pkid warns from 30 days before it expires (`pkid.crl.expiring`).
+
+Each CRL is published at the path of each of the CA's http
+CrlDistributionPoints, under /var/state/pki/http, for pki-httpd to serve.
+
+--- machine\software\pki\http
+canonical: Machine\Software\Pki\Http
+
+Settings for pki-httpd, which serves the CRLs pkid publishes. pki-httpd's
+service account may read this key and nothing else here.
+
+--- machine\software\pki\http port
+canonical: Machine\Software\Pki\Http Port
+type: REG_DWORD
+default: 80
+valid: 1–65535
+applies: restart of pki-httpd
+
+The TCP port pki-httpd serves CRLs on. Binding it needs a reservation in
+Machine\System\Network\TcpIp\PortReservations that grants pki-httpd;
+`pki setup` adds one for this port unless another reservation of exactly
+that port exists, which it never replaces. Run `pki setup` again after
+changing the port.

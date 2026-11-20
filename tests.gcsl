@@ -68,12 +68,21 @@ def test cli(
     }
 }
 
+def test httpd(
+    tests: List<rust.RustTest> = rust.tests(native_crates(), "pki-httpd"),
+    given: List<{at: String, place: Dir | File}> = peios_rs.runtime(),
+) {
+    let each = for test in tests {
+        = rust.run_test(test, given = given, env = peios_rs.runtime_env())
+    }
+}
+
 def portable() -> List<String> {
     = ["pki-core", "pki-keys", "pki-pipeline", "pki-policy", "pki-store"]
 }
 
 def native() -> List<String> {
-    = ["pki", "pki-management", "pkid", "pkid-core", "pkid-client"]
+    = ["pki", "pki-httpd", "pki-management", "pkid", "pkid-core", "pkid-client"]
 }
 
 def test clippy(checked: List<List<{}>> = [

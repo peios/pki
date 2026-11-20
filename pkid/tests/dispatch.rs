@@ -20,7 +20,9 @@ use pki_pipeline::{Directory, PipelineError, Principal};
 use pki_policy::defaults::{name_root, server_template};
 use pki_policy::{AccessChecker, PolicyError, RegData, SecurityBlob, Values};
 use pki_store::{RequestFilter, Store};
+use pkid::config::AuthorityConfig;
 use pkid::config::{load, Defaults, Snapshot, Source};
+use pkid::crl::{self, Publication, Publisher};
 use pkid::dispatch::{apply, handle, Audit, Configurator, Event, Services, State};
 use pkid_core::{
     ErrorCode, Issuer, KeySpec, Outcome, Passphrase, Reply, Request, RequestQuery, WireError,
@@ -131,6 +133,20 @@ struct Recorder(RefCell<Vec<Event>>);
 impl Audit for Recorder {
     fn record(&self, event: Event) {
         self.0.borrow_mut().push(event);
+    }
+}
+
+/// A CA's identifier and a CRL published for it.
+type Published = (String, Vec<u8>);
+
+/// Every CRL published, by CA.
+#[derive(Clone, Default)]
+struct Shelf(Arc<Mutex<Vec<Published>>>);
+
+impl Publisher for Shelf {
+    fn publish(&self, ca: &AuthorityConfig, crl: &[u8]) -> Result<(), String> {
+        self.0.lock().unwrap().push((ca.id.clone(), crl.to_vec()));
+        Ok(())
     }
 }
 
@@ -257,6 +273,10 @@ fn snapshot(certificate: &[u8]) -> Snapshot {
         ),
     );
     authority.insert("Templates", RegData::MultiSz(vec![SERVER.to_uppercase()]));
+    authority.insert(
+        "CrlDistributionPoints",
+        RegData::MultiSz(vec!["http://pki.home/issuing.crl".into()]),
+    );
     Snapshot {
         settings: Values::new(),
         templates: vec![(
@@ -279,6 +299,8 @@ struct World {
     keys: MemoryStore,
     audit: Recorder,
     defaults: Defaults,
+    shelf: Shelf,
+    publishers: Vec<Box<dyn Publisher>>,
 }
 
 impl World {
@@ -305,6 +327,7 @@ impl World {
                 loaded: Err("not loaded yet".into()),
                 keys: HashMap::new(),
                 source: None,
+                publication: Publication::default(),
             },
             registry: Registry(
                 RefCell::new(snapshot(&ca_certificate(&key))),
@@ -314,7 +337,10 @@ impl World {
             keys,
             audit: Recorder::default(),
             defaults: defaults(),
+            shelf: Shelf::default(),
+            publishers: Vec::new(),
         };
+        world.publishers.push(Box::new(world.shelf.clone()));
         let source = world.registry.read();
         let services = Services {
             directory: &People,
@@ -322,10 +348,28 @@ impl World {
             configurator: &world.registry,
             providers: &world.providers,
             defaults: &world.defaults,
+            publishers: &world.publishers,
         };
         apply(&mut world.state, source, &services);
         assert!(world.state.loaded.is_ok());
         world
+    }
+
+    /// Runs pkid's CRL schedule at `now`.
+    fn maintain(&mut self, now: OffsetDateTime) {
+        let services = Services {
+            directory: &People,
+            audit: &self.audit,
+            configurator: &self.registry,
+            providers: &self.providers,
+            defaults: &self.defaults,
+            publishers: &self.publishers,
+        };
+        crl::maintain(&mut self.state, &services, now);
+    }
+
+    fn published(&self) -> Vec<Published> {
+        self.shelf.0.lock().unwrap().clone()
     }
 
     fn call(&mut self, request: Request, caller: &Person) -> Result<Reply, WireError> {
@@ -335,6 +379,7 @@ impl World {
             configurator: &self.registry,
             providers: &self.providers,
             defaults: &self.defaults,
+            publishers: &self.publishers,
         };
         handle(&mut self.state, request, caller, &services, NOW)
     }
@@ -383,6 +428,7 @@ fn an_unchanged_registry_is_not_loaded_again() {
         configurator: &world.registry,
         providers: &world.providers,
         defaults: &world.defaults,
+        publishers: &world.publishers,
     };
     apply(&mut world.state, world.registry.read(), &services);
     assert_eq!(world.audit.0.borrow().len(), 1);
@@ -963,6 +1009,7 @@ fn cas_are_reconfigured_by_their_managers() {
             ca: "issuing".into(),
             templates: Some(Vec::new()),
             crl_distribution_points: Some(vec!["http://pki.home/issuing.crl".into()]),
+            crl_lifetime_days: None,
         },
         &admin,
     ));
@@ -983,15 +1030,231 @@ fn cas_are_reconfigured_by_their_managers() {
         ca: "issuing".into(),
         templates: Some(vec!["no-such-template".into()]),
         crl_distribution_points: None,
+        crl_lifetime_days: None,
     };
     assert_eq!(world.code(unknown, &admin), ErrorCode::BadRequest);
     let by_user = Request::ConfigureAuthority {
         ca: "issuing".into(),
         templates: None,
         crl_distribution_points: None,
+        crl_lifetime_days: None,
     };
     assert_eq!(
         world.code(by_user, &Person::user(JACK)),
         ErrorCode::AccessDenied
     );
+}
+
+// CRLs.
+
+fn issue_to_radius(world: &mut World) -> Vec<u8> {
+    let reply = world
+        .call(
+            Request::Submit {
+                ca: "issuing".into(),
+                template: SERVER.into(),
+                csr: csr(&["radius.home"]),
+            },
+            &Person::user(RADIUS),
+        )
+        .unwrap();
+    let Reply::Submission(submission) = reply else {
+        panic!("expected a submission");
+    };
+    let Reply::Certificate(certificate) = world
+        .call(
+            Request::CertificateFor {
+                ca: "issuing".into(),
+                request: submission.request,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap()
+    else {
+        panic!("expected a certificate");
+    };
+    certificate.serial
+}
+
+fn crl_numbers(world: &World) -> Vec<u64> {
+    world
+        .audit
+        .0
+        .borrow()
+        .iter()
+        .filter_map(|event| match event {
+            Event::CrlPublished { number, .. } => Some(*number),
+            _ => None,
+        })
+        .collect()
+}
+
+#[test]
+fn the_schedule_signs_a_crl_and_renews_it_at_half_its_life() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    assert_eq!(crl_numbers(&world), [1]);
+    assert_eq!(world.published().len(), 1);
+    assert_eq!(world.published()[0].0, "issuing");
+    // Nothing more is due until half way through its seven days.
+    world.maintain(NOW + time::Duration::days(3));
+    assert_eq!(crl_numbers(&world), [1]);
+    world.maintain(NOW + time::Duration::hours(84));
+    assert_eq!(crl_numbers(&world), [1, 2]);
+    // A CA that renews its own CRL isn't warned about while it does.
+    assert!(!world
+        .audit
+        .0
+        .borrow()
+        .iter()
+        .any(|event| matches!(event, Event::CrlExpiring { .. })));
+}
+
+#[test]
+fn a_revocation_is_published_at_once() {
+    use x509_parser::prelude::{CertificateRevocationList, FromDer};
+    let mut world = World::new();
+    world.maintain(NOW);
+    let serial = issue_to_radius(&mut world);
+    world
+        .call(
+            Request::Revoke {
+                ca: "issuing".into(),
+                serial: serial.clone(),
+                reason: 1,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    assert_eq!(crl_numbers(&world), [1, 2]);
+    let published = world.published();
+    let (_, list) = CertificateRevocationList::from_der(&published[1].1).unwrap();
+    let listed: Vec<_> = list
+        .iter_revoked_certificates()
+        .map(|revoked| revoked.raw_serial().to_vec())
+        .collect();
+    assert_eq!(listed, [serial]);
+    let Reply::Authorities(authorities) = world
+        .call(Request::Authorities, &Person::admin(ALEX))
+        .unwrap()
+    else {
+        panic!("expected authorities");
+    };
+    let crl = authorities[0].crl.clone().unwrap();
+    assert_eq!(crl.number, 2);
+    assert_eq!(authorities[0].crl_lifetime_days, 7);
+    assert_eq!(crl.next_update - crl.this_update, 7 * 86_400);
+}
+
+#[test]
+fn a_revocation_brings_one_crl_not_two() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    let serial = issue_to_radius(&mut world);
+    world
+        .call(
+            Request::Revoke {
+                ca: "issuing".into(),
+                serial,
+                reason: 1,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    // The schedule's next round finds nothing newer than the CRL the
+    // revocation brought.
+    world.maintain(NOW + time::Duration::minutes(1));
+    assert_eq!(crl_numbers(&world), [1, 2]);
+}
+
+#[test]
+fn a_new_distribution_point_is_published_without_a_new_crl() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    assert_eq!(world.published().len(), 1);
+    world
+        .call(
+            Request::ConfigureAuthority {
+                ca: "issuing".into(),
+                templates: None,
+                crl_distribution_points: Some(vec!["http://pki.home/new/issuing.crl".into()]),
+                crl_lifetime_days: None,
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    world.maintain(NOW + time::Duration::minutes(1));
+    // The same CRL, handed to the publishers again for the new address.
+    assert_eq!(crl_numbers(&world), [1]);
+    let published = world.published();
+    assert_eq!(published.len(), 2);
+    assert_eq!(published[0].1, published[1].1);
+}
+
+#[test]
+fn officers_publish_a_crl_on_request() {
+    let mut world = World::new();
+    let publish = || Request::PublishCrl {
+        ca: "issuing".into(),
+        passphrase: None,
+    };
+    assert_eq!(
+        world.code(publish(), &Person::user(JACK)),
+        ErrorCode::AccessDenied
+    );
+    let Reply::Crl(crl) = world.call(publish(), &Person::admin(ALEX)).unwrap() else {
+        panic!("expected a CRL");
+    };
+    assert_eq!(crl.number, 1);
+    assert!(world.audit.0.borrow().iter().any(|event| matches!(
+        event,
+        Event::CrlPublished { officer: Some(officer), .. } if officer.as_str() == ALEX
+    )));
+}
+
+#[test]
+fn a_crl_lifetime_is_set_per_ca() {
+    let mut world = World::new();
+    let set = |days| Request::ConfigureAuthority {
+        ca: "issuing".into(),
+        templates: None,
+        crl_distribution_points: None,
+        crl_lifetime_days: Some(days),
+    };
+    assert_eq!(
+        world.code(set(0), &Person::admin(ALEX)),
+        ErrorCode::BadRequest
+    );
+    let reply = world.call(set(14), &Person::admin(ALEX));
+    assert_eq!(authority(reply).crl_lifetime_days, 14);
+    world.maintain(NOW);
+    let Reply::Authorities(authorities) = world
+        .call(Request::Authorities, &Person::admin(ALEX))
+        .unwrap()
+    else {
+        panic!("expected authorities");
+    };
+    let crl = authorities[0].crl.clone().unwrap();
+    assert_eq!(crl.next_update - crl.this_update, 14 * 86_400);
+}
+
+#[test]
+fn a_ca_that_cannot_renew_its_crl_is_warned_about() {
+    let mut world = World::new();
+    world.maintain(NOW);
+    // Without its key, as with a sealed one, pkid can't renew the CRL, so
+    // it warns from 30 days before expiry: here, at once.
+    world.state.keys.clear();
+    world.maintain(NOW + time::Duration::days(5));
+    world.maintain(NOW + time::Duration::days(5) + time::Duration::hours(1));
+    let warnings: Vec<_> = world
+        .audit
+        .0
+        .borrow()
+        .iter()
+        .filter(|event| matches!(event, Event::CrlExpiring { .. }))
+        .cloned()
+        .collect();
+    // Once a day at most.
+    assert_eq!(warnings.len(), 1, "{warnings:?}");
 }

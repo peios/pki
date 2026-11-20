@@ -1,16 +1,15 @@
 //! The control wire's codec.
 
 use pkid_core::{
-    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, ErrorCode,
+    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo, ErrorCode,
     FrameError, Issuer, KeySpec, Outcome, Passphrase, Reply, Request, RequestInfo, RequestQuery,
-    RequestStatus, RevocationInfo, SubmissionInfo, TemplateInfo, WireError, MAX_LISTING,
-    SERVICE_NAME, SERVICE_SID,
+    RequestStatus, RevocationInfo, SubmissionInfo, TemplateInfo, WireError, HTTPD_SERVICE_NAME,
+    HTTPD_SERVICE_SID, MAX_LISTING, SERVICE_NAME, SERVICE_SID,
 };
 use sha1::{Digest, Sha1};
 
-#[test]
-fn the_service_sid_follows_peinits_rule() {
-    let name: Vec<u8> = SERVICE_NAME
+fn service_sid(name: &str) -> String {
+    let name: Vec<u8> = name
         .to_uppercase()
         .encode_utf16()
         .flat_map(u16::to_le_bytes)
@@ -20,7 +19,13 @@ fn the_service_sid_follows_peinits_rule() {
         .chunks(4)
         .map(|chunk| u32::from_le_bytes(chunk.try_into().unwrap()).to_string())
         .collect();
-    assert_eq!(SERVICE_SID, format!("S-1-5-80-{}", parts.join("-")));
+    format!("S-1-5-80-{}", parts.join("-"))
+}
+
+#[test]
+fn the_service_sids_follow_peinits_rule() {
+    assert_eq!(SERVICE_SID, service_sid(SERVICE_NAME));
+    assert_eq!(HTTPD_SERVICE_SID, service_sid(HTTPD_SERVICE_NAME));
 }
 
 #[test]
@@ -167,6 +172,15 @@ fn management_requests_round_trip() {
             ca: "issuing".into(),
             templates: Some(vec!["server".into(), "device".into()]),
             crl_distribution_points: None,
+            crl_lifetime_days: Some(14),
+        },
+        Request::PublishCrl {
+            ca: "root".into(),
+            passphrase: Some(Passphrase::new(b"the root's passphrase".to_vec())),
+        },
+        Request::PublishCrl {
+            ca: "issuing".into(),
+            passphrase: None,
         },
     ];
     for request in requests {
@@ -248,6 +262,12 @@ fn replies_round_trip() {
                     name: "Server".into(),
                 }],
                 key_available: true,
+                crl_lifetime_days: 7,
+                crl: Some(CrlInfo {
+                    number: 12,
+                    this_update: 1_800_000_000,
+                    next_update: 1_800_604_800,
+                }),
             },
             AuthorityInfo {
                 id: "lab".into(),
@@ -257,8 +277,15 @@ fn replies_round_trip() {
                 key: "service:lab".into(),
                 templates: Vec::new(),
                 key_available: true,
+                crl_lifetime_days: 180,
+                crl: None,
             },
         ])),
+        Ok(Reply::Crl(CrlInfo {
+            number: 3,
+            this_update: 1_800_000_000,
+            next_update: 1_815_552_000,
+        })),
         Ok(Reply::Signed(vec![0x30, 0x03])),
         Ok(Reply::SealedKey(b"PEIOSKEY".to_vec())),
         Ok(Reply::Submission(SubmissionInfo {

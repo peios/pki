@@ -12,9 +12,9 @@ use peios::registry::{Key, KeyAccess, OpenFlags, SecInfo, Transaction};
 use peios::security::{sddl, AceFlags, AceType, SdView};
 use pki_policy::defaults::{device_template, name_root, server_template};
 use pki_policy::{SecurityBlob, Values, DEFAULT_NAME_ROOT_SDDL, DEFAULT_TEMPLATE_ENROLL_SDDL};
-use pkid_core::SERVICE_SID;
+use pkid_core::{HTTPD_SERVICE_SID, SERVICE_SID};
 
-use crate::{KEYS_DIR, ROOT, STATE_DIR};
+use crate::{HTTP_DIR, KEYS_DIR, ROOT, STATE_DIR};
 
 fn error(error: peios::Error) -> io::Error {
     error.into()
@@ -54,10 +54,12 @@ fn private_directory(path: &str, dacl: &str) -> io::Result<()> {
 /// The database directory admits SYSTEM, Administrators and pkid: the
 /// database holds requests and certificates, nothing secret. The key
 /// directory admits pkid fully and lets SYSTEM and Administrators only list
-/// and pass through it; each key file in it is pkid's alone.
+/// and pass through it; each key file in it is pkid's alone. The published
+/// folder holds the CRLs pkid publishes, which pki-httpd may read.
 pub fn state_directories() -> io::Result<()> {
     private_directory(STATE_DIR, &state_dacl()).map_err(at(STATE_DIR))?;
-    private_directory(KEYS_DIR, &keys_dacl()).map_err(at(KEYS_DIR))
+    private_directory(KEYS_DIR, &keys_dacl()).map_err(at(KEYS_DIR))?;
+    private_directory(HTTP_DIR, &http_dacl()).map_err(at(HTTP_DIR))
 }
 
 /// The database directory's DACL. Its entries pass to the files created in
@@ -69,6 +71,25 @@ pub fn state_dacl() -> String {
 /// The key directory's DACL.
 pub fn keys_dacl() -> String {
     format!("D:P(A;;FRFX;;;SY)(A;;FRFX;;;BA)(A;OICI;FA;;;{SERVICE_SID})")
+}
+
+/// The published folder's DACL: pkid writes the CRLs it publishes, and
+/// pki-httpd may only read them.
+pub fn http_dacl() -> String {
+    format!(
+        "D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;FA;;;{SERVICE_SID})(A;OICI;FR;;;{HTTPD_SERVICE_SID})"
+    )
+}
+
+/// pki-httpd's grant on `Http`, so that it can read its port.
+pub fn http_grant() -> String {
+    format!("O:SYG:SYD:(A;;KR;;;{HTTPD_SERVICE_SID})")
+}
+
+/// The descriptor of pki-httpd's port reservation: it, and SYSTEM, may
+/// bind the port (`KACS_PORT_BIND`).
+pub fn port_reservation() -> String {
+    format!("O:SYG:SYD:(A;;0x1;;;SY)(A;;0x1;;;{HTTPD_SERVICE_SID})")
 }
 
 /// pkid's own grant on `Authorities`, which the key also inherits to.
@@ -121,6 +142,25 @@ pub struct Seeded {
     pub templates: Vec<String>,
     pub name_roots: bool,
     pub authorities_key: bool,
+    /// Whether pki-httpd was given read access to `Http`.
+    pub http_key: bool,
+    /// What became of pki-httpd's port reservation.
+    pub port: Reservation,
+}
+
+/// pki-httpd's reservation of its port, which it needs to bind it.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub enum Reservation {
+    /// Setup reserved the port for pki-httpd.
+    Added(u16),
+    /// The port was already reserved for pki-httpd.
+    #[default]
+    Present,
+    /// Another reservation of exactly this port exists, and it doesn't
+    /// admit pki-httpd. Setup leaves it as it is.
+    Taken(u16),
+    /// The machine has no reservation table to add to.
+    NoTable,
 }
 
 /// Seeds pkid's configuration in one transaction: the Server and Device
@@ -161,6 +201,7 @@ pub fn registry() -> io::Result<Seeded> {
     }
 
     wrote |= create(&format!("{ROOT}\\Authorities"), &transaction)?.1;
+    wrote |= create(&format!("{ROOT}\\Http"), &transaction)?.1;
     if wrote {
         transaction
             .commit()
@@ -170,43 +211,49 @@ pub fn registry() -> io::Result<Seeded> {
     // Outside the transaction: kernels before read-only snapshots
     // (2026-11-16) can't change a descriptor within one. Run again, setup
     // finishes what an interrupted run left.
-    seeded.authorities_key = grant_authorities()?;
+    seeded.authorities_key = grant(
+        &format!("{ROOT}\\Authorities"),
+        SERVICE_SID,
+        &authorities_grant(),
+    )?;
+    seeded.http_key = grant(&format!("{ROOT}\\Http"), HTTPD_SERVICE_SID, &http_grant())?;
+    seeded.port = reserve_port()?;
     Ok(seeded)
 }
 
-/// Gives pkid its grant on `Authorities`, with everything the key inherits
-/// from above it, unless the key has it. Says whether it was given.
-fn grant_authorities() -> io::Result<bool> {
-    let path = format!("{ROOT}\\Authorities");
+/// Gives `sid` the grant `own` on the key `path`, with everything the key
+/// inherits from above it, unless the key has an entry of its own for
+/// `sid`. Says whether it was given.
+fn grant(path: &str, sid: &str, own: &str) -> io::Result<bool> {
     let key = Key::open(
         None,
-        &path,
+        path,
         KeyAccess::READ_CONTROL | KeyAccess::WRITE_DAC,
         OpenFlags::empty(),
     )
     .map_err(error)
-    .map_err(at(&path))?;
+    .map_err(at(path))?;
     let current = key
         .get_security(SecInfo::DACL)
         .map_err(error)
-        .map_err(at(&path))?;
-    if grants_pkid(current.as_bytes()) {
+        .map_err(at(path))?;
+    if grants(current.as_bytes(), sid) {
         return Ok(false);
     }
     let parent = Key::open(None, ROOT, KeyAccess::READ_CONTROL, OpenFlags::empty())
         .and_then(|key| key.get_security(SecInfo::DACL))
         .map_err(error)
         .map_err(at(ROOT))?;
-    let own = sddl::parse(&authorities_grant()).map_err(error)?;
+    let own = sddl::parse(own).map_err(error)?;
     let descriptor = sddl::reinherit(parent.as_bytes(), own.as_bytes(), true).map_err(error)?;
     key.set_security(SecInfo::DACL, &descriptor, None)
         .map_err(error)
-        .map_err(at(&path))?;
+        .map_err(at(path))?;
     Ok(true)
 }
 
-/// Whether `descriptor` has pkid's own grant.
-fn grants_pkid(descriptor: &[u8]) -> bool {
+/// Whether `descriptor` has an entry of its own allowing `sid` anything.
+fn grants(descriptor: &[u8], sid: &str) -> bool {
     let Ok(view) = SdView::parse(descriptor) else {
         return false;
     };
@@ -214,7 +261,87 @@ fn grants_pkid(descriptor: &[u8]) -> bool {
         dacl.iter().any(|ace| {
             ace.ace_type() == AceType::AccessAllowed
                 && !ace.flags().contains(AceFlags::INHERITED)
-                && ace.sid().is_some_and(|sid| sid.to_string() == SERVICE_SID)
+                && ace.sid().is_some_and(|entry| entry.to_string() == sid)
         })
     })
+}
+
+/// The port reservation table.
+pub const PORT_RESERVATIONS: &str = "Machine\\System\\Network\\TcpIp\\PortReservations";
+
+/// The port pki-httpd serves on: `Http Port`, or 80.
+pub fn http_port() -> io::Result<u16> {
+    let path = format!("{ROOT}\\Http");
+    let key = match Key::open(None, &path, KeyAccess::QUERY_VALUE, OpenFlags::empty()) {
+        Ok(key) => key,
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            return if failure.kind() == io::ErrorKind::NotFound {
+                Ok(DEFAULT_HTTP_PORT)
+            } else {
+                Err(at(&path)(failure))
+            };
+        }
+    };
+    match key.query_value(b"Port", None) {
+        Ok(value) => match peios::registry::Data::decode(value.ty, &value.data) {
+            peios::registry::Data::Dword(port) if (1..=65535).contains(&port) => Ok(port as u16),
+            _ => Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("{path} Port: not a port number from 1 to 65535"),
+            )),
+        },
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            if failure.kind() == io::ErrorKind::NotFound {
+                Ok(DEFAULT_HTTP_PORT)
+            } else {
+                Err(at(&path)(failure))
+            }
+        }
+    }
+}
+
+/// The port pki-httpd serves on unless `Http Port` sets one.
+pub const DEFAULT_HTTP_PORT: u16 = 80;
+
+/// Reserves pki-httpd's TCP port for it, unless a reservation of exactly
+/// that port exists, which setup never replaces: the table is shared, and
+/// the kernel refuses it whole if it is malformed.
+fn reserve_port() -> io::Result<Reservation> {
+    let port = http_port()?;
+    let key = match Key::open(
+        None,
+        PORT_RESERVATIONS,
+        KeyAccess::QUERY_VALUE | KeyAccess::SET_VALUE,
+        OpenFlags::empty(),
+    ) {
+        Ok(key) => key,
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            return if failure.kind() == io::ErrorKind::NotFound {
+                Ok(Reservation::NoTable)
+            } else {
+                Err(at(PORT_RESERVATIONS)(failure))
+            };
+        }
+    };
+    let selector = format!("tcp:{port}");
+    match key.query_value(selector.as_bytes(), None) {
+        Ok(existing) if grants(&existing.data, HTTPD_SERVICE_SID) => Ok(Reservation::Present),
+        Ok(_) => Ok(Reservation::Taken(port)),
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            if failure.kind() != io::ErrorKind::NotFound {
+                return Err(at(PORT_RESERVATIONS)(failure));
+            }
+            let descriptor = sddl::parse(&port_reservation()).map_err(error)?;
+            let data = peios::registry::Data::Binary(descriptor.as_bytes().to_vec());
+            key.set_value(selector.as_bytes(), data.ty(), &data.encode())
+                .call()
+                .map_err(error)
+                .map_err(at(PORT_RESERVATIONS))?;
+            Ok(Reservation::Added(port))
+        }
+    }
 }

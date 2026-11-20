@@ -18,7 +18,8 @@ proper_nouns = [
   "CA", "CAs", "TLS", "EAP-TLS", "PKCS", "SID", "SIDs", "SDDL", "GUID",
   "DNS", "UPN", "RFC", "ECDSA", "RSA", "P-256", "P-384", "AES-256",
   "Administrators", "Authenticated Users", "Users", "SYSTEM",
-  "PRINCIPAL SELF", "Server", "Device",
+  "PRINCIPAL SELF", "Server", "Device", "CRL", "CRLs", "HTTP",
+  "pki-httpd", "curl", "OpenSSL",
 ]
 
 [lint.spelling]

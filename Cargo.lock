@@ -684,6 +684,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "pki-httpd"
+version = "0.1.0"
+dependencies = [
+ "libc",
+ "peios",
+ "pki-management",
+ "pkid-core",
+]
+
+[[package]]
 name = "pki-keys"
 version = "0.1.0"
 dependencies = [
@@ -752,6 +762,7 @@ dependencies = [
  "pkid-core",
  "rcgen",
  "time",
+ "x509-parser",
 ]
 
 [[package]]

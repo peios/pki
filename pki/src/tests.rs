@@ -203,6 +203,8 @@ fn authority(id: &str, name: &str, key: &str) -> AuthorityInfo {
             name: "Server".into(),
         }],
         key_available: !key.starts_with("file:"),
+        crl_lifetime_days: if key.starts_with("file:") { 180 } else { 7 },
+        crl: None,
     }
 }
 
@@ -610,6 +612,7 @@ fn set_replaces_only_what_it_names() {
                 "aaaaaaaa-0000-4000-8000-000000000001".into(),
             ]),
             crl_distribution_points: None,
+            crl_lifetime_days: None,
         }
     );
 
@@ -1396,4 +1399,99 @@ fn enrolment_needs_a_name_and_collecting_needs_the_key() {
         out.display()
     ))
     .contains("cannot be used with"));
+}
+
+// CRLs.
+
+#[test]
+fn publish_crl_brings_a_sealed_keys_passphrase() {
+    let host = fake()
+        .replying(Reply::Crl(pkid_core::CrlInfo {
+            number: 3,
+            this_update: 0,
+            next_update: 86_400,
+        }))
+        .answering(&[PASSPHRASE]);
+    let output = running(&host, "ca publish-crl Root").unwrap();
+    assert_eq!(
+        output.text,
+        "Published CRL 3 of CA Root, valid until 1970-01-02T00:00:00Z.\n"
+    );
+    let Request::PublishCrl { ca, passphrase } = host.sent() else {
+        panic!()
+    };
+    assert_eq!(ca, "11111111-1111-4111-8111-111111111111");
+    assert_eq!(passphrase.unwrap().expose(), PASSPHRASE.as_bytes());
+
+    // A key pkid keeps needs none.
+    let host = fake().replying(Reply::Crl(pkid_core::CrlInfo {
+        number: 1,
+        this_update: 0,
+        next_update: 1,
+    }));
+    running(&host, "ca publish-crl Issuing").unwrap();
+    let Request::PublishCrl { passphrase, .. } = host.sent() else {
+        panic!()
+    };
+    assert!(passphrase.is_none());
+    assert!(host.prompts.borrow().is_empty());
+}
+
+#[test]
+fn revoking_with_a_sealed_key_says_to_publish_a_crl() {
+    let host = fake().replying(Reply::Done);
+    let output = running(&host, "cert revoke Root 0a1b").unwrap();
+    assert!(
+        output.text.contains("pki ca publish-crl 11111111"),
+        "{}",
+        output.text
+    );
+    assert_eq!(output.json["crl_published"], false);
+    let host = fake().replying(Reply::Done);
+    let output = running(&host, "cert revoke Issuing 0a1b").unwrap();
+    assert!(!output.text.contains("publish-crl"), "{}", output.text);
+}
+
+#[test]
+fn crl_lifetimes_are_set_with_ca_set() {
+    let host = fake().replying(Reply::Authority(authority("x", "Issuing", "service:x")));
+    running(&host, "ca set Issuing --crl-lifetime 14").unwrap();
+    let Request::ConfigureAuthority {
+        crl_lifetime_days,
+        templates,
+        ..
+    } = host.sent()
+    else {
+        panic!()
+    };
+    assert_eq!(crl_lifetime_days, Some(14));
+    assert_eq!(templates, None);
+}
+
+#[test]
+fn a_crl_close_to_expiry_is_flagged() {
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs() as i64;
+    let mut root = authority("r", "Root", "file:/media/root.key");
+    root.crl = Some(pkid_core::CrlInfo {
+        number: 2,
+        this_update: now - 170 * 86_400,
+        next_update: now + 10 * 86_400,
+    });
+    assert!(crate::show::crl_expiring(&root, now));
+    assert!(crate::show::crl_until(&root).ends_with("expires soon"));
+    // pkid renews a store key's CRL itself, so seven days left of seven is
+    // nothing to flag.
+    let mut issuing = authority("i", "Issuing", "service:i");
+    issuing.crl = Some(pkid_core::CrlInfo {
+        number: 9,
+        this_update: now,
+        next_update: now + 7 * 86_400,
+    });
+    assert!(!crate::show::crl_expiring(&issuing, now));
+    let output = running(&fake(), "ca list").unwrap();
+    assert!(output.text.starts_with("NAME"), "{}", output.text);
+    assert!(output.text.contains("CRL UNTIL"), "{}", output.text);
 }

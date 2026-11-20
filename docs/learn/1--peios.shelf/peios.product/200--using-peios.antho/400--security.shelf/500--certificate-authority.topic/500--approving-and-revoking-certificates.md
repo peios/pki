@@ -5,6 +5,7 @@ description: As an officer of a CA, find held requests, approve or deny
   them, and revoke certificates that are not to be trusted.
 related:
   - peios/certificate-authority/overview
+  - peios/certificate-authority/publishing-revocation-lists
   - peios/certificate-authority/requesting-a-certificate
   - peios/certificate-authority/controlling-who-can-request-certificates
 ---
@@ -73,6 +74,12 @@ The requester then collects the certificate, as described in
 
 A revocation can't be undone. pkid records it with its reason, the time, and
 the officer who made it. `pki(8)` lists every reason.
+
+Software learns of the revocation from the CA's revocation list. pkid
+publishes a new list at once for a CA whose key it keeps. For a CA whose key
+is in a sealed file, `pki` reminds you to publish one with
+`pki ca publish-crl`, as described in
+[Publishing Revocation Lists](~peios/certificate-authority/publishing-revocation-lists).
 
 ## Check the result
 
