@@ -4,6 +4,7 @@
 use std::collections::BTreeMap;
 use std::fmt;
 
+use pki_core::DnsName;
 use pki_keys::KeyReference;
 use pki_pipeline::Configuration;
 use pki_policy::{NameNode, NamePolicy, NameTree, SecurityBlob, Template, TreeKind, Values};
@@ -138,7 +139,8 @@ pub fn load(snapshot: &Snapshot, defaults: &Defaults) -> Result<Loaded, ConfigEr
             "Names\\Principals",
         )?,
     )
-    .map_err(|error| invalid("Names", error))?;
+    .map_err(|error| invalid("Names", error))?
+    .with_principal_domains(principal_domains(&snapshot.settings)?);
 
     let mut authorities = Vec::new();
     for (id, values) in &snapshot.authorities {
@@ -164,6 +166,28 @@ pub fn load(snapshot: &Snapshot, defaults: &Defaults) -> Result<Loaded, ConfigEr
         authorities,
         manage_security,
     })
+}
+
+/// `Settings PrincipalDomains`: the domains whose principal names belong
+/// to the accounts their user parts name. Each is a DNS name, without a
+/// wildcard.
+fn principal_domains(settings: &Values) -> Result<Vec<DnsName>, ConfigError> {
+    if settings.get("PrincipalDomains").is_none() {
+        return Ok(Vec::new());
+    }
+    let listed = settings
+        .multi_sz("PrincipalDomains")
+        .map_err(|error| invalid("Settings", error))?;
+    listed
+        .iter()
+        .map(|domain| match DnsName::new(domain.trim()) {
+            Ok(name) if !name.is_wildcard() => Ok(name),
+            _ => Err(invalid(
+                "Settings",
+                format!("PrincipalDomains: {domain:?} is not a domain name"),
+            )),
+        })
+        .collect()
 }
 
 fn authority(

@@ -46,6 +46,26 @@ The pki command and window do not offer this setting.
 
 A certificate whose names have no single owner never carries the extension.
 
+--- machine\software\pki\settings principaldomains
+canonical: Machine\Software\Pki\Settings PrincipalDomains
+type: REG_MULTI_SZ
+default: none
+valid: DNS names, without wildcards
+applies: new requests
+
+The domains whose principal names belong to accounts. A principal name
+user@domain, as a UPN or email address, whose domain is listed and whose
+own key under Names\Principals names no Owner, is owned by the account
+authd knows as user. That account then matches PRINCIPAL SELF, so it can
+request its own name, and certificates for it carry its SID.
+
+Only the account's own name is used, which only an administrator can set,
+and only principals answer, never groups. A name in a domain not listed
+is never looked up. An explicit Owner always wins. If authd can't be
+asked, the name has no owner, so a request for it is refused or held.
+
+List only domains this machine speaks for. Set it with `pki name domains`.
+
 --- machine\software\pki\settings managesecurity
 canonical: Machine\Software\Pki\Settings ManageSecurity
 type: REG_BINARY
@@ -240,7 +260,9 @@ valid: a SID in string form
 applies: new requests
 
 The principal that owns exactly this name. It is what PRINCIPAL SELF
-matches, and certificates for names it owns carry its SID. Ownership doesn't
+matches, and certificates for names it owns carry its SID. A principal name
+without one, in a domain Settings PrincipalDomains lists, is owned by the
+account its user part names. Ownership doesn't
 extend to names below this one. A group may own a name, which makes every
 member its owner; never make a broad group, such as Users, an owner.
 

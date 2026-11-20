@@ -26,7 +26,7 @@ pub use access::{
     TEMPLATE_AUTOENROLL, TEMPLATE_ENROLL,
 };
 pub use error::PolicyError;
-pub use evaluate::{evaluate, Decision, NameDecision, NamePolicy, Outcome};
+pub use evaluate::{evaluate, Accounts, Decision, NameDecision, NamePolicy, NoAccounts, Outcome};
 pub use profile::{leaf_profile, IssueContext};
 pub use template::{CommonNameRule, Issuance, KeyRequirement, NameType, Template};
 pub use tree::{NameNode, NameTree, Resolution, TreeKind};

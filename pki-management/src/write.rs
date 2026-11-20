@@ -51,20 +51,35 @@ fn create_path(path: &str, transaction: &Transaction) -> io::Result<(Key, bool)>
     )
 }
 
-fn apply(key: &Key, set: &Values, remove: &[&str], transaction: &Transaction) -> io::Result<()> {
+/// Sets and removes values on `key`. Says whether it changed anything.
+fn apply(key: &Key, set: &Values, remove: &[&str], transaction: &Transaction) -> io::Result<bool> {
+    let mut wrote = false;
     for (name, value) in set.iter() {
         let value = data(value);
         key.set_value(name.as_bytes(), value.ty(), &value.encode())
             .in_txn(transaction)
             .call()?;
+        wrote = true;
     }
     for name in remove {
-        if let Err(error) = key.delete_value(name.as_bytes(), None, Some(transaction)) {
-            let error: io::Error = error.into();
-            if error.kind() != io::ErrorKind::NotFound {
-                return Err(error);
+        match key.delete_value(name.as_bytes(), None, Some(transaction)) {
+            Ok(()) => wrote = true,
+            Err(error) => {
+                let error: io::Error = error.into();
+                if error.kind() != io::ErrorKind::NotFound {
+                    return Err(error);
+                }
             }
         }
+    }
+    Ok(wrote)
+}
+
+/// Commits `transaction` if it wrote anything: kernels before read-only
+/// snapshots (2026-11-16) refuse to commit an empty one.
+fn finish(transaction: Transaction, wrote: bool) -> io::Result<()> {
+    if wrote {
+        transaction.commit()?;
     }
     Ok(())
 }
@@ -79,19 +94,17 @@ pub fn change(path: &str, set: &Values, remove: &[&str]) -> io::Result<()> {
         OpenFlags::empty(),
         Some(&transaction),
     )?;
-    apply(&key, set, remove, &transaction)?;
-    transaction.commit()?;
-    Ok(())
+    let wrote = apply(&key, set, remove, &transaction)?;
+    finish(transaction, wrote)
 }
 
 /// Sets `set` and removes `remove` on `path`, creating it and any keys
 /// above it first if they are missing.
 pub fn put(path: &str, set: &Values, remove: &[&str]) -> io::Result<()> {
     let transaction = Transaction::begin()?;
-    let (key, _) = create_path(path, &transaction)?;
-    apply(&key, set, remove, &transaction)?;
-    transaction.commit()?;
-    Ok(())
+    let (key, created) = create_path(path, &transaction)?;
+    let wrote = apply(&key, set, remove, &transaction)?;
+    finish(transaction, created || wrote)
 }
 
 /// Creates `path` with `set`, failing if it exists.

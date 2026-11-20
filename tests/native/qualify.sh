@@ -13,6 +13,7 @@ runtime=/lcl/radius-dev/current
 export PATH=$runtime/bin:$PATH LD_LIBRARY_PATH=$runtime/lib
 pkid_sid=S-1-5-80-927106304-3681130234-3843647545-210868499-909250352
 httpd_sid=S-1-5-80-4101192810-2505649581-2921298127-1686389970-3617382032
+lpsd_sid=S-1-5-80-4242895835-3884168475-4287610261-1596539771-2019494472
 ca='Test Issuing'
 
 step() {
@@ -61,6 +62,16 @@ step state ls -la /var/state/pki /var/state/pki/keys
 # attributes (FILE_READ_ATTRIBUTES), and to pass through it (FILE_TRAVERSE).
 step var-state sd set /var/state "O:SYG:SYD:P(A;OICI;FA;;;SY)(A;;0x1000a0;;;${pkid_sid})"
 
+# lpsd, the local account store, as authd's source, as in radius's guest.
+reg new -p Machine/Software/Authd/Sources/lpsd
+reg set Machine/Software/Authd/Sources/lpsd MayAssertForeignMemberships dword:1
+reg set Machine/Software/Authd/Sources/lpsd UnixIDBase dword:1000000
+reg set Machine/Software/Authd/Sources/lpsd UnixIDCount dword:1000000
+reg set -p "Machine/Generic/Authn/Policy/$lpsd_sid" Privileges multi:SeChangeNotifyPrivilege,SeAuditPrivilege
+reg set "Machine/Generic/Authn/Policy/$lpsd_sid" Integrity sz:System
+mkdir -p /var/state/lpsd
+sd set /var/state/lpsd "O:${lpsd_sid}G:${lpsd_sid}D:P(A;OICI;GA;;;SY)(A;OICI;GA;;;${lpsd_sid})"
+
 # authd makes service accounts' tokens, as in radius's and fservd's guests.
 # pkid emits events, which needs SeAuditPrivilege.
 reg set -p Machine/Generic/Authn/Policy/Everyone Privileges multi:SeChangeNotifyPrivilege
@@ -75,6 +86,13 @@ step define svctl definition create pkid --set ImagePath=/bin/bash --set Argumen
     --set "Arguments=export LD_LIBRARY_PATH=$runtime/lib; exec $runtime/bin/pkid >/run/pkid/log 2>&1" \
     --set Identity=Service --set RuntimeDirectories=pkid --set Requires=authd --set Readiness=Notify \
     --set RequiredPrivileges=SeChangeNotifyPrivilege --set RequiredPrivileges=SeAuditPrivilege
+step define-lpsd svctl definition create lpsd --set ImagePath=/bin/bash --set Arguments=-c \
+    --set "Arguments=export LD_LIBRARY_PATH=$runtime/lib; exec $runtime/bin/lpsd" --set Identity=Service \
+    --set RuntimeDirectories=lpsd --set Requires=authd --set Readiness=Notify \
+    --set RequiredPrivileges=SeChangeNotifyPrivilege --set RequiredPrivileges=SeAuditPrivilege
+step start-lpsd svctl start lpsd
+printf 'development-only-password\ndevelopment-only-password\n' | lps add alice --display-name 'Alice Liddell' --home /home/alice --shell /bin/bash
+step alice lps show alice
 step start svctl start pkid
 sleep 2
 step status svctl status pkid
@@ -122,9 +140,22 @@ step enroll pki enroll "$ca" Server --dns www.test.home --out /tmp/www.p12 \
 step enroll-upn pki enroll "$ca" Device --upn alice@test.home --out /tmp/alice.p12 \
     --passphrase-file /tmp/passphrase
 
+# Principal names owned by their accounts: alice@test.home is Alice's, and
+# her certificate carries her SID; a template named after the owner takes
+# her display name from authd.
+step domains pki name domains --set test.home
+step enroll-alice pki enroll "$ca" Device --upn alice@test.home --out /tmp/alice-own.p12 \
+    --passphrase-file /tmp/passphrase
+step template-named pki template create Named --from Device --common-name owner-display-name
+step ca-set-named pki ca set "$ca" --template Server --template Device --template Named
+step enroll-named pki enroll "$ca" Named --upn alice@test.home --out /tmp/alice-named.p12 \
+    --passphrase-file /tmp/passphrase
+step nobody-owns pki enroll "$ca" Named --upn nobody@test.home --out /tmp/nobody.p12 \
+    --passphrase-file /tmp/passphrase
+
 # A template that holds every request for approval.
 step template-create pki template create Web --from Server --issuance approval
-step ca-set pki ca set "$ca" --template Server --template Device --template Web
+step ca-set pki ca set "$ca" --template Server --template Device --template Named --template Web
 step held pki enroll "$ca" Web --dns app.test.home --out /tmp/app.p12 \
     --passphrase-file /tmp/passphrase
 step pending pki request list "$ca" --status pending
@@ -174,6 +205,8 @@ dump root.pem /tmp/root.pem
 dump www.p12 /tmp/www.p12
 dump alice.p12 /tmp/alice.p12
 dump root.crl.http /tmp/root.crl.http
+dump alice-own.p12 /tmp/alice-own.p12
+dump alice-named.p12 /tmp/alice-named.p12
 dump issuing-before.crl.http /tmp/issuing-before.crl.http
 dump issuing-after.crl.http /tmp/issuing-after.crl.http
 dump head.http /tmp/head.http

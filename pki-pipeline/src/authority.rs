@@ -4,7 +4,7 @@ use std::collections::BTreeMap;
 
 use peios_crypto::Signer;
 use pki_core::{DisplayName, Sid};
-use pki_policy::{AccessChecker, NamePolicy, SecurityBlob, Template};
+use pki_policy::{AccessChecker, Accounts, NamePolicy, SecurityBlob, Template};
 
 use crate::PipelineError;
 
@@ -38,8 +38,9 @@ pub trait Principal {
     fn snapshot(&self) -> Result<Vec<u8>, PipelineError>;
 }
 
-/// Identity services the pipeline needs beyond the caller.
-pub trait Directory {
+/// Identity services the pipeline needs beyond the caller, including the
+/// account directory that owns principal names in the listed domains.
+pub trait Directory: Accounts {
     /// The principal a [`Principal::snapshot`] recorded.
     fn restore(&self, snapshot: &[u8]) -> Result<Box<dyn Principal>, PipelineError>;
 

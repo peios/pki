@@ -132,6 +132,14 @@ A request is issued only if the caller can enroll in its template, by the templa
 and can request each name it asks for, by the
 .B RequestSecurity
 of that name or the nearest name above it.
+A principal name with no owner of its own, in a domain
+.B Settings PrincipalDomains
+lists, is owned by the account
+.BR authd (8)
+knows by its user part; if authd can't be asked, it has no owner.
+.B pkid
+also takes owners' display names from authd, for templates that name certificates after their owner.
+.PP
 Approval checks the request again as its requester, as they were when they submitted it, so an officer's own rights never widen what is issued.
 .PP
 Everyone can connect to the socket; what each caller can do is decided only by these checks.

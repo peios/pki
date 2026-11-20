@@ -678,6 +678,47 @@ pub fn name(host: &dyn Host, command: NameCommand) -> Result<Output, Failure> {
             })
         }
 
+        NameCommand::Domains { domains, none } => {
+            let settings = format!("{ROOT}\\Settings");
+            let current = list(&snapshot.settings, "PrincipalDomains").to_vec();
+            let (listed, changed) = if none {
+                host.put(&settings, &Values::new(), &["PrincipalDomains"])
+                    .map_err(|error| written(error, "domains"))?;
+                (Vec::new(), true)
+            } else if domains.is_empty() {
+                (current, false)
+            } else {
+                let mut checked = Vec::new();
+                for domain in &domains {
+                    match pki_core::DnsName::new(domain.trim()) {
+                        Ok(name) if !name.is_wildcard() => checked.push(name.as_str().to_owned()),
+                        _ => {
+                            return Err(Failure::usage(format!(
+                                "domains: '{domain}' is not a domain name"
+                            )))
+                        }
+                    }
+                }
+                let mut set = Values::new();
+                set.insert("PrincipalDomains", RegData::MultiSz(checked.clone()));
+                host.put(&settings, &set, &[])
+                    .map_err(|error| written(error, "domains"))?;
+                (checked, true)
+            };
+            let text = if listed.is_empty() {
+                "No domains: principal names have only the owners set on them.\n".to_string()
+            } else {
+                format!(
+                    "Accounts own their principal names in: {}.\n",
+                    listed.join(", ")
+                )
+            };
+            Ok(Output {
+                json: json!({"principal_domains": listed, "changed": changed}),
+                text,
+            })
+        }
+
         NameCommand::SetOwner { name, owner, none } => {
             let name = parse_name(&name)?;
             let what = format!("set-owner {}", name.display());

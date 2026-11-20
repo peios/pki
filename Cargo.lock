@@ -70,6 +70,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "auth-core"
+version = "0.0.24"
+source = "git+https://github.com/peios/authd.git?rev=aca253873bf86838f0510920759fc9f5436d2b6f#aca253873bf86838f0510920759fc9f5436d2b6f"
+dependencies = [
+ "libc",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -750,6 +758,7 @@ dependencies = [
 name = "pkid"
 version = "0.1.0"
 dependencies = [
+ "auth-core",
  "libc",
  "peios",
  "peios-crypto",

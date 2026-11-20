@@ -408,6 +408,15 @@ pub enum NameCommand {
         #[arg(long, conflicts_with = "sddl")]
         inherit: bool,
     },
+    /// Show or set the domains whose principal names belong to accounts
+    Domains {
+        /// Let accounts own principal names in this domain; repeat for more
+        #[arg(long = "set", value_name = "domain", conflicts_with = "none")]
+        domains: Vec<String>,
+        /// List no domains, so principal names have only the owners set on them
+        #[arg(long)]
+        none: bool,
+    },
     /// Set or clear a name's owner
     #[command(override_usage = "pki name set-owner [options] <name> <sid>
        pki name set-owner [options] <name> --none")]

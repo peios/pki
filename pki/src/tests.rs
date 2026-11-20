@@ -1495,3 +1495,40 @@ fn a_crl_close_to_expiry_is_flagged() {
     assert!(output.text.starts_with("NAME"), "{}", output.text);
     assert!(output.text.contains("CRL UNTIL"), "{}", output.text);
 }
+
+// Principal names owned by accounts.
+
+#[test]
+fn principal_domains_are_set_and_checked() {
+    let host = fake();
+    let output = running(&host, "name domains --set Home --set lab.home").unwrap();
+    assert_eq!(
+        output.text,
+        "Accounts own their principal names in: home, lab.home.\n"
+    );
+    let written = writes(&host);
+    let [Write::Put(path, values, _)] = written.as_slice() else {
+        panic!("{written:?}")
+    };
+    assert_eq!(*path, "Machine\\Software\\Pki\\Settings");
+    assert_eq!(
+        values.multi_sz("PrincipalDomains").unwrap(),
+        ["home", "lab.home"]
+    );
+
+    let failure = running(&fake(), "name domains --set *.home").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+
+    let host = fake();
+    running(&host, "name domains --none").unwrap();
+    let written = writes(&host);
+    let [Write::Put(_, values, removed)] = written.as_slice() else {
+        panic!("{written:?}")
+    };
+    assert!(values.iter().next().is_none());
+    assert_eq!(removed, &["PrincipalDomains"]);
+
+    let output = running(&fake(), "name domains").unwrap();
+    assert!(output.text.starts_with("No domains"), "{}", output.text);
+    assert!(writes(&fake()).is_empty());
+}

@@ -116,6 +116,12 @@ impl Principal for Person {
 
 struct People;
 
+impl pki_policy::Accounts for People {
+    fn account(&self, _: &str) -> Result<Option<Sid>, String> {
+        Ok(None)
+    }
+}
+
 impl Directory for People {
     fn restore(&self, snapshot: &[u8]) -> Result<Box<dyn Principal>, PipelineError> {
         let text = std::str::from_utf8(snapshot).unwrap();
@@ -1257,4 +1263,29 @@ fn a_ca_that_cannot_renew_its_crl_is_warned_about() {
         .collect();
     // Once a day at most.
     assert_eq!(warnings.len(), 1, "{warnings:?}");
+}
+
+#[test]
+fn principal_domains_are_read_and_checked() {
+    let key = PrivateKey::generate(KeyAlgorithm::EcdsaP256).unwrap();
+    let mut snapshot = snapshot(&ca_certificate(&key));
+    snapshot.settings.insert(
+        "PrincipalDomains",
+        RegData::MultiSz(vec!["Home".into(), "lab.home".into()]),
+    );
+    let loaded = load(&snapshot, &defaults()).unwrap();
+    let domains: Vec<&str> = loaded
+        .configuration
+        .names
+        .principal_domains
+        .iter()
+        .map(|domain| domain.as_str())
+        .collect();
+    assert_eq!(domains, ["home", "lab.home"]);
+    for bad in ["*.home", "not a domain"] {
+        snapshot
+            .settings
+            .insert("PrincipalDomains", RegData::MultiSz(vec![bad.into()]));
+        assert!(load(&snapshot, &defaults()).is_err(), "{bad}");
+    }
 }
