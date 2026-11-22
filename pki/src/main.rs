@@ -34,7 +34,7 @@ fn main() -> ExitCode {
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     let args: Vec<OsString> = std::env::args_os().collect();
     // The Certificate Authority window, as its launcher declaration
-    // (dev.peios.pkid.toml) starts it.
+    // (dev.peios.pki.toml) starts it.
     if args.len() == 2 && args[1] == "--window" {
         #[cfg(feature = "window")]
         return ExitCode::from(window::open() as u8);

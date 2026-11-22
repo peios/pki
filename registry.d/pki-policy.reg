@@ -1,0 +1,54 @@
+{
+  "_comment": [
+    "The privileges pkid and pki-httpd need, for them and nothing else.",
+    "",
+    "Both keep SeChangeNotifyPrivilege, without which a process can't",
+    "traverse a directory to reach its executable, state or sockets. pkid",
+    "also has SeAuditPrivilege, so that it can write its events",
+    "(pkid.evman): the record of every certificate it issues, every",
+    "decision on a held request and every revocation. It lets the holder",
+    "write KMES events under its own kernel-stamped identity, nothing more.",
+    "pki-httpd writes no events.",
+    "",
+    "authd unions the privileges of every SID on a token, and a service",
+    "token carries the S-1-5-80 service SID derived from the service name,",
+    "so a record named for that SID grants the privileges to that one",
+    "service.",
+    "",
+    "The SIDs below are SHA-1 of 'PKID' and 'PKI-HTTPD' as upper-cased",
+    "UTF-16LE, read as five little-endian u32s, which is the derivation",
+    "authd and peinit both implement (authd/src/service_sid.rs), and they",
+    "are pkid_core's SERVICE_SID and HTTPD_SERVICE_SID, which pki's tests",
+    "check them against. A .reg file can't compute them; if a service is",
+    "ever renamed, its SID here must be recomputed.",
+    "",
+    "Separate from pki-services.reg because a privilege grant is a",
+    "different kind of statement from a service definition: an image may",
+    "review or withhold it, and an administrator looking for what on this",
+    "machine may write audit events should find one file that answers it.",
+    "",
+    "Shipped by the pki package into /usr/share/regim/; inert until an",
+    "image names it in [registry] autoapply."
+  ],
+  "keys": [
+    { "path": "Machine\\Generic" },
+    { "path": "Machine\\Generic\\Authn" },
+    { "path": "Machine\\Generic\\Authn\\Policy" },
+    {
+      "path": "Machine\\Generic\\Authn\\Policy\\S-1-5-80-927106304-3681130234-3843647545-210868499-909250352",
+      "values": [
+        {
+          "name": "Privileges",
+          "type": "multi",
+          "data": ["SeChangeNotifyPrivilege", "SeAuditPrivilege"]
+        }
+      ]
+    },
+    {
+      "path": "Machine\\Generic\\Authn\\Policy\\S-1-5-80-4101192810-2505649581-2921298127-1686389970-3617382032",
+      "values": [
+        { "name": "Privileges", "type": "multi", "data": ["SeChangeNotifyPrivilege"] }
+      ]
+    }
+  ]
+}

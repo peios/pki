@@ -59,10 +59,15 @@ file: pkid sees only the request.
 built with the `window` feature. It makes its changes by running `pki`'s own
 commands, answering their prompts from what was typed into it, and asks pkid,
 the Registry and peinit what the person may do before offering it.
-`pki/dev.peios.pkid.toml` is its launcher declaration (PGSS Applications)
-and `pki/pki.svg` its icon, installed as `/usr/share/apps/dev.peios.pkid.toml`
-and `/usr/share/icons/base/dev.peios.pkid.svg` by the package that installs
+`pki/dev.peios.pki.toml` is its launcher declaration (PGSS Applications)
+and `pki/pki.svg` its icon, installed as `/usr/share/apps/dev.peios.pki.toml`
+and `/usr/share/icons/base/dev.peios.pki.svg` by the package that installs
 `pki`.
+
+`registry.d` holds the Registry seeds that package installs: the pkid and
+pki-httpd service definitions, which start neither, and the privileges of
+their service identities. `pki setup` provisions the machine, then has both
+services start at boot and starts them.
 
 ## Build and test
 

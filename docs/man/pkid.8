@@ -207,6 +207,13 @@ The account needs SeChangeNotifyPrivilege, and SeAuditPrivilege to emit its even
 .B pkid
 works but each event fails with a message on standard error.
 It must be able to read the attributes of every directory on the path to its database, as SQLite checks each when it opens it.
+pki's package defines the service and grants these privileges in the Registry seeds
+.I pki\-services.reg
+and
+.IR pki\-policy.reg ,
+and the service starts at no time until
+.B pki setup
+creates its state directories and has it start at boot.
 .SH READINESS
 .B pkid
 tells peinit it is ready once its socket is listening, even while its configuration is invalid, so that it can answer and say what is wrong.

@@ -10,11 +10,16 @@ def crates() -> rust.RustWorkspace {
 # The workspace with libpeios placed for `peios-sys`, for the crates that
 # talk to Peios: pkid, its wire and its client, pki-management, pki and
 # pki-httpd. The window build adds the `gxwi` crate's libgxwi.
+# pki-management's tests read the Registry seeds the package installs.
 def native_crates(window: Bool = false) -> rust.RustWorkspace {
     let gui: List<rust.CrateSettings> = if window { gxwi.crate_settings() } else { [] }
     = rust.workspace(
         dir("."), rust.vendored(file("Cargo.lock")),
-        crates = [...peios_rs.crate_settings(), ...gui],
+        crates = [
+            {package = "pki-management"; data = [{at = "registry.d"; place = dir("registry.d")}]},
+            ...peios_rs.crate_settings(),
+            ...gui,
+        ],
         libclang = [clang.libclang_18()],
     )
 }

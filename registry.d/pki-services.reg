@@ -1,0 +1,82 @@
+{
+  "_comment": [
+    "The pkid and pki-httpd service definitions.",
+    "",
+    "Neither has a Triggers value, so installing the package starts",
+    "nothing: a machine runs a certificate authority only once an",
+    "administrator sets one up. `pki setup` (Set Up in the Certificate",
+    "Authority window) provisions the machine and then adds Triggers=boot",
+    "to both, never replacing a Triggers value already there.",
+    "",
+    "Both run under their own virtual service accounts (Identity Service),",
+    "whose tokens authd makes, so both require authd. RequiredPrivileges",
+    "names everything each keeps: peinit removes every privilege outside",
+    "the list, and without SeChangeNotifyPrivilege a process can't",
+    "traverse a directory. pkid also keeps SeAuditPrivilege, which lets it",
+    "write its events (pkid.evman); pki-policy.reg grants both to the",
+    "service SIDs alone.",
+    "",
+    "Neither has a hook to make pkid's state directories: `pki setup`",
+    "makes /var/state/pki and the folders in it, with their descriptors,",
+    "before it turns pkid on, and pkid isn't started before setup. The",
+    "SQLite database reads the attributes of each directory on its path;",
+    "fsbase lets Everyone traverse /var/state, which includes that.",
+    "",
+    "RestartPolicy is OnFailure (1) and ErrorControl Normal (0): a machine",
+    "boots without its certificate authority, and peinit restarts a",
+    "service that fails.",
+    "",
+    "Readiness is Notify (0): pkid notifies once its socket is listening,",
+    "even while its configuration is invalid, so that it can say what is",
+    "wrong; pki-httpd once it is listening on its port.",
+    "",
+    "Shipped by the pki package into /usr/share/regim/; inert until an",
+    "image names it in [registry] autoapply."
+  ],
+  "keys": [
+    { "path": "Machine\\System" },
+    { "path": "Machine\\System\\Services" },
+    {
+      "path": "Machine\\System\\Services\\pkid",
+      "values": [
+        { "name": "ImagePath", "type": "sz", "data": "/usr/sbin/pkid" },
+        { "name": "Identity", "type": "sz", "data": "Service" },
+        {
+          "name": "RequiredPrivileges",
+          "type": "multi",
+          "data": ["SeChangeNotifyPrivilege", "SeAuditPrivilege"]
+        },
+        { "name": "Requires", "type": "multi", "data": ["authd"] },
+        { "name": "Readiness", "type": "dword", "data": 0 },
+        { "name": "RuntimeDirectories", "type": "multi", "data": ["pkid"] },
+        { "name": "RestartPolicy", "type": "dword", "data": 1 },
+        { "name": "ErrorControl", "type": "dword", "data": 0 },
+        { "name": "DisplayName", "type": "sz", "data": "Certificate Service" },
+        {
+          "name": "Description",
+          "type": "sz",
+          "data": "Issues and revokes certificates for this machine's certificate authorities"
+        }
+      ]
+    },
+    {
+      "path": "Machine\\System\\Services\\pki-httpd",
+      "values": [
+        { "name": "ImagePath", "type": "sz", "data": "/usr/sbin/pki-httpd" },
+        { "name": "Identity", "type": "sz", "data": "Service" },
+        { "name": "RequiredPrivileges", "type": "multi", "data": ["SeChangeNotifyPrivilege"] },
+        { "name": "Requires", "type": "multi", "data": ["authd"] },
+        { "name": "Readiness", "type": "dword", "data": 0 },
+        { "name": "RuntimeDirectories", "type": "multi", "data": ["pki-httpd"] },
+        { "name": "RestartPolicy", "type": "dword", "data": 1 },
+        { "name": "ErrorControl", "type": "dword", "data": 0 },
+        { "name": "DisplayName", "type": "sz", "data": "Revocation Publishing" },
+        {
+          "name": "Description",
+          "type": "sz",
+          "data": "Serves the certificate authorities' revocation lists over HTTP"
+        }
+      ]
+    }
+  ]
+}

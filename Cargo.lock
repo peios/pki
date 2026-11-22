@@ -1138,6 +1138,7 @@ dependencies = [
  "pki-core",
  "pki-policy",
  "pkid-core",
+ "serde_json",
 ]
 
 [[package]]
