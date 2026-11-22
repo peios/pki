@@ -1,12 +1,13 @@
 //! The name trees: who may request certificates for which names, and who
 //! owns them.
 
-use gxwi::settings::{self, Glyph, Kind, Tile, Tone};
-use gxwi::Fields;
+use gxwi::settings::{self, Glyph, Kind, More, Tile, Tone, Width};
+use gxwi::{escape, Fields};
 use pki_management::names::NamePath;
 use pki_management::{security, Snapshot};
 use pki_policy::{SecurityBlob, TreeKind, Values};
 
+use super::doing::Asking;
 use super::{describe, service, words, Window};
 
 /// The Names section's line in the side.
@@ -164,15 +165,37 @@ pub fn list(window: &Window, fields: &Fields) -> String {
     }
 
     let listed = domains(config);
-    let rows = settings::row(
-        "Principal Domains",
-        "In these domains, each account owns the names that are its own: alice@home belongs to the account alice, who may request certificates for it.",
-        &if listed.is_empty() {
-            settings::value("None", false)
+    let about = "In these domains, each account owns the names that are its own: alice@home belongs to the account alice, who may request certificates for it.";
+    let rows =
+        if window.seen.may.settings {
+            settings::row(
+                "Principal Domains",
+                about,
+                &format!(
+                    "{}{}",
+                    settings::text(
+                        "domains",
+                        "Principal Domains",
+                        "text",
+                        Width::Normal,
+                        !window.busy,
+                        r#"placeholder="None" autocomplete="off" spellcheck="false""#
+                    ),
+                    settings::button("Save", "domains-save", &[], Kind::Plain, !window.busy)
+                        .replacen("class=\"st-button\"", "class=\"st-button pki-beside\"", 1),
+                ),
+            )
         } else {
-            settings::value(&listed.join(", "), true)
-        },
-    );
+            settings::row(
+                "Principal Domains",
+                about,
+                &if listed.is_empty() {
+                    settings::value("None", false)
+                } else {
+                    settings::value(&listed.join(", "), true)
+                },
+            )
+        };
     page.push_str(&settings::group(
         "Accounts",
         &rows,
@@ -183,7 +206,41 @@ pub fn list(window: &Window, fields: &Fields) -> String {
         },
     ));
 
-    page.push_str(&settings::search("find", "Find", "Find a name", ""));
+    let adding = window.seen.may.names.values().any(|may| may.add);
+    page.push_str(&settings::search(
+        "find",
+        "Find",
+        "Find a name",
+        &if adding {
+            settings::button(
+                "Add a Name…",
+                "add-name",
+                &[],
+                Kind::Primary,
+                !window.busy && window.asking.is_none(),
+            )
+        } else {
+            String::new()
+        },
+    ));
+    if window.asking == Some(Asking::AddName) {
+        page.push_str(&settings::group(
+            "Add a Name",
+            &settings::more(
+                More::Form,
+                &format!(
+                    r#"<div class="fields"><label>Name{}</label></div>{}"#,
+                    settings::text("add-name", "Name", "text", Width::Wide, true, r#"placeholder="radius.lab.home, alice@home or @home" autocomplete="off" spellcheck="false" fx-autofocus"#),
+                    settings::actions(&format!(
+                        "{}{}",
+                        settings::button("Cancel", "cancel", &[], Kind::Plain, true),
+                        settings::button("Add", "add-name-confirm", &[], Kind::Primary, !window.busy),
+                    )),
+                ),
+            ),
+            &settings::note("It inherits who may request it from the name above it until you change that."),
+        ));
+    }
     let find = fields.get("find");
     page.push_str(&settings::group(
         "Network Names",
@@ -275,7 +332,50 @@ pub fn page(window: &Window, text: &str) -> String {
             !window.busy,
         ),
     );
-    rows.push_str(&settings::fact("Permissions", &from, false));
+    let own_values = values(config, &name);
+    let has_own = own_values.is_some_and(|v| v.binary("RequestSecurity").ok().flatten().is_some());
+    if editable && has_own && !name.path.is_empty() {
+        rows.push_str(&settings::row(
+            "Permissions",
+            &format!(
+                "{from}. Inheriting again drops them for what {} gives.",
+                name.parent().map(|p| p.display()).unwrap_or_default()
+            ),
+            &settings::button(
+                "Inherit Again…",
+                "inherit",
+                &[("name", &shown)],
+                Kind::Plain,
+                !window.busy && window.asking.is_none(),
+            ),
+        ));
+        if window.asking
+            == Some(Asking::Inherit {
+                name: shown.clone(),
+            })
+        {
+            rows.push_str(&settings::more(
+                More::Asking,
+                &format!(
+                    "<p>Drop {}'s own permissions, so it inherits them again?</p>{}",
+                    escape(&shown),
+                    settings::actions(&format!(
+                        "{}{}",
+                        settings::focused_button("Keep Them", "cancel", Kind::Plain),
+                        settings::button(
+                            "Inherit Again",
+                            "inherit-confirm",
+                            &[],
+                            Kind::Danger,
+                            !window.busy
+                        ),
+                    )),
+                ),
+            ));
+        }
+    } else {
+        rows.push_str(&settings::fact("Permissions", &from, false));
+    }
     page.push_str(&settings::group(
         "Requesting",
         &rows,
@@ -283,10 +383,92 @@ pub fn page(window: &Window, text: &str) -> String {
             "Wildcards, such as *.lab.home, need the Wildcard right on lab.home as well.",
         ),
     ));
+    let mut rows = if editable {
+        settings::row(
+            "Owner",
+            &owner(window, config, &name),
+            &settings::button(
+                "Change…",
+                "owner",
+                &[("name", &shown)],
+                Kind::Plain,
+                !window.busy && window.asking.is_none(),
+            ),
+        )
+    } else {
+        settings::fact("Owner", &owner(window, config, &name), false)
+    };
+    if window.asking
+        == Some(Asking::Owner {
+            name: shown.clone(),
+        })
+    {
+        let explicit = own_values
+            .and_then(|v| v.sz("Owner").ok().flatten())
+            .is_some();
+        rows.push_str(&settings::more(
+            More::Form,
+            &format!(
+                r#"<div class="fields"><label>Account{}</label></div>{}"#,
+                settings::text("owner", "Account", "text", Width::Normal, true, r#"placeholder="An account name, such as alice, or a SID" autocomplete="off" spellcheck="false" fx-autofocus"#),
+                settings::actions(&format!(
+                    "{}{}{}",
+                    settings::button("Cancel", "cancel", &[], Kind::Plain, true),
+                    if explicit {
+                        settings::button("Remove Owner", "owner-none", &[], Kind::Danger, !window.busy)
+                    } else {
+                        String::new()
+                    },
+                    settings::button("Set Owner", "owner-confirm", &[], Kind::Primary, !window.busy),
+                )),
+            ),
+        ));
+    }
     page.push_str(&settings::group(
         "Owner",
-        &settings::fact("Owner", &owner(window, config, &name), false),
+        &rows,
         &settings::hint("The owner may request the name as their own, and certificates for it are bound to their account."),
     ));
+
+    let removable = window
+        .seen
+        .may
+        .names
+        .get(&name.key())
+        .is_some_and(|may| may.delete)
+        && own_values.is_some()
+        && !name.path.is_empty();
+    if removable {
+        let mut rows = settings::row(
+            "Remove Name",
+            "Its own permissions and owner go; what is above it applies again. A name with names below it can't be removed.",
+            &settings::button("Remove…", "remove-name", &[("name", &shown)], Kind::Danger, !window.busy && window.asking.is_none()),
+        );
+        if window.asking
+            == Some(Asking::RemoveName {
+                name: shown.clone(),
+            })
+        {
+            rows.push_str(&settings::more(
+                More::Asking,
+                &format!(
+                    "<p>Remove {}?</p>{}",
+                    escape(&shown),
+                    settings::actions(&format!(
+                        "{}{}",
+                        settings::focused_button("Keep It", "cancel", Kind::Plain),
+                        settings::button(
+                            "Remove",
+                            "remove-name-confirm",
+                            &[],
+                            Kind::Danger,
+                            !window.busy
+                        ),
+                    )),
+                ),
+            ));
+        }
+        page.push_str(&settings::group("", &rows, ""));
+    }
     page
 }

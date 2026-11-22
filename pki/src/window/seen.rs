@@ -347,3 +347,19 @@ pub fn certificates(ca: &str) -> Result<Vec<CertificateInfo>, String> {
     all.reverse();
     Ok(all)
 }
+
+/// The SID of the principal authd knows by `name`: an account, never a
+/// group, as pkid takes owners.
+pub fn account(name: &str) -> Result<Option<String>, String> {
+    let ident = Ident::new().with_timeout(AUTHD_TIMEOUT);
+    let record = ident
+        .lookup(
+            IdentKey::Name(name.to_owned()),
+            IdentKind::Principal,
+            Fields::empty(),
+        )
+        .map_err(|failure| failure.to_string())?;
+    Ok(record
+        .filter(|record| record.kind_found == IdentKind::Principal)
+        .and_then(|record| SidRef::from_bytes(&record.sid).map(|sid| sid.to_string())))
+}

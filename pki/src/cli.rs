@@ -318,7 +318,7 @@ pub enum TemplateCommand {
 
 /// A template's values, as given to create or change it. Each list given
 /// replaces the template's list.
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct TemplateFields {
     /// Give certificates an extended key usage; repeat for more
     #[arg(long = "purpose", value_name = "purpose")]

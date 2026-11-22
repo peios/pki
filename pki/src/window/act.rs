@@ -18,7 +18,8 @@ use zeroize::Zeroizing;
 
 use super::service::sentence;
 use crate::cli::{
-    Ca, Cert, Command, Create, Enroll, Import, Issuer, Issuing, Keeping, RequestCommand, Set,
+    Ca, Cert, Command, Create, Enroll, Import, Issuer, Issuing, Keeping, NameCommand,
+    RequestCommand, Set, TemplateCommand, TemplateFields,
 };
 use crate::failure::{Failure, Kind};
 use crate::host::Host;
@@ -105,7 +106,7 @@ pub struct Ran {
 
 /// The commands' own words for what they were doing, which come first in
 /// a failure's message.
-const CONTEXTS: [&str; 16] = [
+const CONTEXTS: [&str; 22] = [
     "approve ",
     "deny ",
     "revoke ",
@@ -122,6 +123,12 @@ const CONTEXTS: [&str; 16] = [
     "create ",
     "import ",
     "list CAs",
+    "delete ",
+    "add ",
+    "remove ",
+    "set-owner ",
+    "domains",
+    "reading the configuration",
 ];
 
 /// A command's failure, said as the window says things. `doing` is what
@@ -134,7 +141,10 @@ pub fn failed(doing: &str, failure: &Failure) -> String {
         }
     }
     match failure.kind {
-        Kind::Denied if message == "access denied" => {
+        Kind::Denied
+            if message == "access denied"
+                || message.to_ascii_lowercase().contains("permission denied") =>
+        {
             format!("You don't have permission to {doing}.")
         }
         _ => {
@@ -665,4 +675,175 @@ pub fn import(host: &dyn Host, imported: Imported) -> Result<String, String> {
         "import authorities",
     )?;
     Ok(format!("{} imported.", imported.name))
+}
+
+/// A template's values, as its form gives them.
+#[derive(Debug, Clone, Default)]
+pub struct TemplateForm {
+    pub name: String,
+    pub purposes: Vec<String>,
+    pub key_usages: Vec<String>,
+    pub lifetime: u32,
+    pub renewal_window: u32,
+    pub key_algorithms: Vec<String>,
+    pub name_types: Vec<String>,
+    pub common_name: String,
+    pub issuance: String,
+}
+
+pub fn change_template(host: &dyn Host, id: &str, form: TemplateForm) -> Result<String, String> {
+    run(
+        host,
+        Command::Template(TemplateCommand::Set {
+            template: id.to_owned(),
+            name: Some(form.name.clone()),
+            fields: TemplateFields {
+                purposes: form.purposes,
+                key_usages: form.key_usages,
+                lifetime: Some(form.lifetime),
+                renewal_window: Some(form.renewal_window),
+                key_algorithms: form.key_algorithms,
+                name_types: form.name_types,
+                common_name: Some(form.common_name),
+                issuance: Some(form.issuance),
+                enroll_security: None,
+            },
+        }),
+        Vec::new(),
+        "change templates",
+    )?;
+    Ok(format!("{} saved.", form.name))
+}
+
+/// Makes a template named `name`, a copy of `from`. Returns its GUID.
+pub fn new_template(host: &dyn Host, name: &str, from: &str) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Template(TemplateCommand::Create {
+            name: name.to_owned(),
+            from: Some(from.to_owned()),
+            fields: TemplateFields::default(),
+        }),
+        Vec::new(),
+        "add templates",
+    )?;
+    ran.json["created"]["id"]
+        .as_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "The template was made, but pki didn't say its GUID.".to_string())
+}
+
+pub fn delete_template(host: &dyn Host, id: &str, name: &str) -> Result<String, String> {
+    run(
+        host,
+        Command::Template(TemplateCommand::Delete {
+            template: id.to_owned(),
+        }),
+        Vec::new(),
+        "delete templates",
+    )?;
+    Ok(format!("{name} deleted."))
+}
+
+pub fn template_security(host: &dyn Host, id: &str, sddl: &str) -> Result<String, String> {
+    run(
+        host,
+        Command::Template(TemplateCommand::Set {
+            template: id.to_owned(),
+            name: None,
+            fields: TemplateFields {
+                enroll_security: Some(sddl.to_owned()),
+                ..TemplateFields::default()
+            },
+        }),
+        Vec::new(),
+        "change who may request from this template",
+    )?;
+    Ok("Permissions changed.".into())
+}
+
+/// Each warning a name command gave, after what it did.
+fn with_warnings(done: &str, warnings: Vec<String>) -> String {
+    let mut said = done.to_owned();
+    for warning in warnings {
+        said.push(' ');
+        said.push_str(&sentence(&warning));
+    }
+    said
+}
+
+pub fn add_name(host: &dyn Host, name: &str) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Name(NameCommand::Add {
+            name: name.to_owned(),
+            owner: None,
+        }),
+        Vec::new(),
+        "add names",
+    )?;
+    Ok(with_warnings(&format!("{name} added."), ran.warnings))
+}
+
+pub fn remove_name(host: &dyn Host, name: &str) -> Result<String, String> {
+    run(
+        host,
+        Command::Name(NameCommand::Remove {
+            name: name.to_owned(),
+        }),
+        Vec::new(),
+        "remove names",
+    )?;
+    Ok(format!("{name} removed."))
+}
+
+/// Sets who may request `name`, as SDDL, or with `None` lets it inherit.
+pub fn name_security(host: &dyn Host, name: &str, sddl: Option<&str>) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Name(NameCommand::SetSecurity {
+            name: name.to_owned(),
+            sddl: sddl.map(str::to_owned),
+            inherit: sddl.is_none(),
+        }),
+        Vec::new(),
+        "change who may request this name",
+    )?;
+    let done = if sddl.is_some() {
+        "Permissions changed."
+    } else {
+        "It inherits its permissions again."
+    };
+    Ok(with_warnings(done, ran.warnings))
+}
+
+/// Makes `owner`, a SID, the name's owner, or with `None` leaves it none.
+pub fn set_owner(host: &dyn Host, name: &str, owner: Option<&str>) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Name(NameCommand::SetOwner {
+            name: name.to_owned(),
+            owner: owner.map(str::to_owned),
+            none: owner.is_none(),
+        }),
+        Vec::new(),
+        "change who owns this name",
+    )?;
+    let done = if owner.is_some() {
+        "Owner changed."
+    } else {
+        "Owner removed."
+    };
+    Ok(with_warnings(done, ran.warnings))
+}
+
+pub fn set_domains(host: &dyn Host, domains: Vec<String>) -> Result<String, String> {
+    let none = domains.is_empty();
+    run(
+        host,
+        Command::Name(NameCommand::Domains { domains, none }),
+        Vec::new(),
+        "change the principal domains",
+    )?;
+    Ok("Principal domains saved.".into())
 }

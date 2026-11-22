@@ -28,6 +28,18 @@ pub enum Asking {
     Publish { ca: String },
     /// The file's password, to save a held request's certificate.
     Collect { ca: String, id: i64 },
+    /// Whether to delete a template.
+    DeleteTemplate { id: String },
+    /// The name and model of a new template.
+    NewTemplate,
+    /// A name to add to a tree.
+    AddName,
+    /// Whether to remove a name.
+    RemoveName { name: String },
+    /// Whether a name drops its own permissions to inherit again.
+    Inherit { name: String },
+    /// A name's new owner.
+    Owner { name: String },
 }
 
 /// The fields that hold secrets.
@@ -777,5 +789,155 @@ impl Window {
                 fields,
             );
         });
+    }
+}
+
+impl Window {
+    pub(super) fn save_template(&mut self, fields: &mut Fields) {
+        let Page::Template(id) = &self.page else {
+            return;
+        };
+        let id = id.clone();
+        let Some(values) = self
+            .seen
+            .config
+            .as_ref()
+            .ok()
+            .and_then(|config| config.templates.iter().find(|(guid, _)| *guid == id))
+            .map(|(_, values)| values.clone())
+        else {
+            return;
+        };
+        match super::templates::read(&values, fields) {
+            Ok(form) => self.launch(
+                Box::new(move || act::change_template(&Live::new(), &id, form)),
+                None,
+                fields,
+            ),
+            Err(why) => self.said = Some(Err(why)),
+        }
+    }
+
+    pub(super) fn new_template(&mut self, fields: &mut Fields) {
+        let name = fields.get("new-template-name").trim().to_owned();
+        if name.is_empty() {
+            self.said = Some(Err("Give the template a name.".into()));
+            return;
+        }
+        let from = match fields.get("new-template-from") {
+            "" => self
+                .seen
+                .config
+                .as_ref()
+                .ok()
+                .and_then(|config| config.templates.first())
+                .map(|(id, _)| id.clone())
+                .unwrap_or_default(),
+            chosen => chosen.to_owned(),
+        };
+        self.asking = None;
+        self.launch_then(
+            Box::new(move || {
+                let id = act::new_template(&Live::new(), &name, &from)?;
+                Ok((format!("{name} added."), Some(Page::Template(id))))
+            }),
+            fields,
+        );
+    }
+
+    pub(super) fn delete_template(&mut self, fields: &mut Fields) {
+        let Some(Asking::DeleteTemplate { id }) = self.asking.take() else {
+            return;
+        };
+        let name = self
+            .seen
+            .config
+            .as_ref()
+            .ok()
+            .and_then(|config| config.templates.iter().find(|(guid, _)| *guid == id))
+            .map(|(_, values)| super::templates::name(values))
+            .unwrap_or_else(|| "The template".into());
+        self.launch(
+            Box::new(move || act::delete_template(&Live::new(), &id, &name)),
+            Some(Page::Templates),
+            fields,
+        );
+    }
+
+    pub(super) fn add_name(&mut self, fields: &mut Fields) {
+        let name = fields.get("add-name").trim().to_lowercase();
+        if let Err(why) = pki_management::names::NamePath::parse(&name) {
+            self.said = Some(Err(super::service::sentence(&why)));
+            return;
+        }
+        self.asking = None;
+        let page = Page::Name(name.clone());
+        self.launch(
+            Box::new(move || act::add_name(&Live::new(), &name)),
+            Some(page),
+            fields,
+        );
+    }
+
+    pub(super) fn remove_name(&mut self, fields: &mut Fields) {
+        let Some(Asking::RemoveName { name }) = self.asking.take() else {
+            return;
+        };
+        self.launch(
+            Box::new(move || act::remove_name(&Live::new(), &name)),
+            Some(Page::Names),
+            fields,
+        );
+    }
+
+    pub(super) fn inherit(&mut self, fields: &mut Fields) {
+        let Some(Asking::Inherit { name }) = self.asking.take() else {
+            return;
+        };
+        self.launch(
+            Box::new(move || act::name_security(&Live::new(), &name, None)),
+            None,
+            fields,
+        );
+    }
+
+    /// Sets a name's owner from what was typed: an account's name, which
+    /// authd turns into its SID, or a SID. `none` removes it.
+    pub(super) fn set_owner(&mut self, none: bool, fields: &mut Fields) {
+        let Some(Asking::Owner { name }) = self.asking.clone() else {
+            return;
+        };
+        let typed = fields.get("owner").trim().to_owned();
+        if !none && typed.is_empty() {
+            self.said = Some(Err("Type the account that is to own it.".into()));
+            return;
+        }
+        self.asking = None;
+        self.launch(
+            Box::new(move || {
+                if none {
+                    return act::set_owner(&Live::new(), &name, None);
+                }
+                let sid = if typed.parse::<peios::security::Sid>().is_ok() {
+                    typed.clone()
+                } else {
+                    super::seen::account(&typed)
+                        .map_err(|why| format!("Accounts can't be looked up now: {why}."))?
+                        .ok_or_else(|| format!("There is no account called {typed}."))?
+                };
+                act::set_owner(&Live::new(), &name, Some(&sid))
+            }),
+            None,
+            fields,
+        );
+    }
+
+    pub(super) fn save_domains(&mut self, fields: &mut Fields) {
+        let domains = names(fields.get("domains"));
+        self.launch(
+            Box::new(move || act::set_domains(&Live::new(), domains)),
+            None,
+            fields,
+        );
     }
 }

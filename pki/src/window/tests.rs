@@ -750,6 +750,49 @@ fn pages() -> Vec<(&'static str, Window, Fields)> {
             ),
             none(),
         ),
+        filled(
+            at_page(admin(), Page::Template(SERVER.into())),
+            "template-edit",
+            &[],
+        ),
+        filled(
+            asking(at_page(admin(), Page::Templates), Asking::NewTemplate),
+            "template-new",
+            &[],
+        ),
+        filled(
+            asking(
+                at_page(admin(), Page::Template(DEVICE.into())),
+                Asking::DeleteTemplate { id: DEVICE.into() },
+            ),
+            "template-delete",
+            &[],
+        ),
+        filled(
+            asking(at_page(admin(), Page::Names), Asking::AddName),
+            "names-add",
+            &[],
+        ),
+        filled(
+            asking(
+                at_page(admin(), Page::Name("radius.lab.home".into())),
+                Asking::Owner {
+                    name: "radius.lab.home".into(),
+                },
+            ),
+            "name-owner",
+            &[],
+        ),
+        filled(
+            asking(
+                at_page(admin(), Page::Name("lab.home".into())),
+                Asking::Inherit {
+                    name: "lab.home".into(),
+                },
+            ),
+            "name-inherit",
+            &[],
+        ),
         filled(at_page(admin(), Page::NewAuthority), "new-authority", &[]),
         filled(
             at_page(admin(), Page::NewAuthority),
@@ -883,6 +926,10 @@ fn trouble_is_said_where_it_matters() {
                 assert!(html.contains(r#"name="passphrase""#));
                 assert!(html.contains("collect-confirm"));
             }
+            "template-edit" => assert!(html.contains(r#"fx-submit="template-save""#)),
+            "templates-alice" => assert!(!html.contains("new-template")),
+            "names-alice" => assert!(!html.contains("add-name") && !html.contains("domains-save")),
+            "name-owner" => assert!(html.contains("owner-confirm") && html.contains("owner-none")),
             "new-authority-refused" => assert!(html.contains("permission to add authorities")),
             "new-authority-under" => {
                 assert!(html.contains("new-issuer") && html.contains("new-key-file"))

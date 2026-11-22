@@ -54,6 +54,9 @@ const LOOK_AGAIN: Duration = Duration::from_secs(5);
 /// made, or why it wasn't.
 type Work = Box<dyn FnOnce() -> Result<String, String> + Send>;
 
+/// A change whose page to open comes of it.
+type WorkThen = Box<dyn FnOnce() -> Result<(String, Option<Page>), String> + Send>;
+
 /// How many rows of a long list are shown before Show More.
 const PAGE_ROWS: usize = 100;
 
@@ -258,6 +261,22 @@ impl Window {
                 fields.set("sign-path", "0");
             }
             Page::ExportKey(_) => fields.set("key-out", ""),
+            Page::Template(id) => {
+                if let Some((_, values)) = self
+                    .seen
+                    .config
+                    .as_ref()
+                    .ok()
+                    .and_then(|config| config.templates.iter().find(|(guid, _)| guid == id))
+                {
+                    templates::fill(values, fields);
+                }
+            }
+            Page::Names => {
+                if let Ok(config) = &self.seen.config {
+                    fields.set("domains", &names::domains(config).join(", "));
+                }
+            }
             _ => {}
         }
     }
@@ -332,6 +351,12 @@ impl Window {
     /// Runs `work` away from the lock, then reads everything again and says
     /// what came of it. `then` is the page to open if it worked.
     fn launch(&mut self, work: Work, then: Option<Page>, fields: &Fields) {
+        self.launch_then(Box::new(move || work().map(|said| (said, then))), fields);
+    }
+
+    /// Runs `work` as [`Window::launch`] does, where the page to open
+    /// comes of the work itself.
+    fn launch_then(&mut self, work: WorkThen, fields: &Fields) {
         if self.busy {
             return;
         }
@@ -355,12 +380,19 @@ impl Window {
                     if let Some(listing) = listing {
                         w.listing = listing;
                     }
-                    if result.is_ok() {
-                        if let Some(page) = then {
-                            w.open(page, fields);
+                    let said = match result {
+                        Ok((said, then)) => {
+                            if let Some(page) = then {
+                                w.open(page, fields);
+                            } else {
+                                // What was saved is what the form shows now.
+                                w.fill(fields);
+                            }
+                            Ok(said)
                         }
-                    }
-                    w.said = Some(result);
+                        Err(why) => Err(why),
+                    };
+                    w.said = Some(said);
                 });
             }
         });
@@ -667,6 +699,36 @@ impl Live for Window {
             },
             "install" if !self.busy => self.install(text("ca")),
             "ca-permissions" => self.edit_ca_permissions(&text("ca")),
+            "template-permissions" => self.edit_template_permissions(&text("id")),
+            "name-permissions" => self.edit_name_permissions(&text("name")),
+            "template-save" if !self.busy => self.save_template(fields),
+            "new-template" if !self.busy => {
+                fields.set("new-template-name", "");
+                self.ask(Asking::NewTemplate, fields);
+            }
+            "new-template-confirm" if !self.busy => self.new_template(fields),
+            "delete-template" if !self.busy => {
+                self.ask(Asking::DeleteTemplate { id: text("id") }, fields)
+            }
+            "delete-template-confirm" if !self.busy => self.delete_template(fields),
+            "add-name" if !self.busy => {
+                fields.set("add-name", "");
+                self.ask(Asking::AddName, fields);
+            }
+            "add-name-confirm" if !self.busy => self.add_name(fields),
+            "remove-name" if !self.busy => {
+                self.ask(Asking::RemoveName { name: text("name") }, fields)
+            }
+            "remove-name-confirm" if !self.busy => self.remove_name(fields),
+            "inherit" if !self.busy => self.ask(Asking::Inherit { name: text("name") }, fields),
+            "inherit-confirm" if !self.busy => self.inherit(fields),
+            "owner" if !self.busy => {
+                fields.set("owner", "");
+                self.ask(Asking::Owner { name: text("name") }, fields);
+            }
+            "owner-confirm" if !self.busy => self.set_owner(false, fields),
+            "owner-none" if !self.busy => self.set_owner(true, fields),
+            "domains-save" if !self.busy => self.save_domains(fields),
             "approve" if !self.busy => {
                 if let Ok(id) = text("id").parse() {
                     self.approve(text("ca"), id, fields);
