@@ -52,7 +52,7 @@ fn sddl_text(bytes: &[u8]) -> String {
 
 /// The descriptor `text` gives, with SYSTEM as its owner and group where it
 /// names none, as every descriptor pki and pkid write has them.
-fn parse_sddl(text: &str) -> Result<Vec<u8>, Failure> {
+pub(crate) fn parse_sddl(text: &str) -> Result<Vec<u8>, Failure> {
     let invalid = |error: peios::Error| {
         Failure::usage(format!("'{text}' is not a valid descriptor: {error}"))
     };

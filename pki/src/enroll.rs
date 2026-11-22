@@ -140,8 +140,15 @@ fn request(host: &dyn Host, enroll: &Enroll) -> Result<Output, Failure> {
     let what = format!("enroll {}", names[0]);
     let authority = resolve_ca(host, &enroll.ca)?;
     let template = offered(&authority, template)?;
-    let out = Reserved::new(&enroll.out, true)?;
-    let pending = Reserved::new(&pending_path(&enroll.out), true)?;
+    let reserve = |path: &Path| {
+        if enroll.replace {
+            Reserved::replacing(path, true)
+        } else {
+            Reserved::new(path, true)
+        }
+    };
+    let out = reserve(&enroll.out)?;
+    let pending = reserve(&pending_path(&enroll.out))?;
     let passphrase = new_passphrase(
         host,
         enroll.passphrase_file.as_deref(),
@@ -188,7 +195,7 @@ fn request(host: &dyn Host, enroll: &Enroll) -> Result<Output, Failure> {
                 .map_err(|error| Failure::failed(error.to_string()))?;
             let sealed = seal_key(&key, &seal)
                 .map_err(|error| Failure::failed(error.to_string()).context(&what))?;
-            let key_path = pending.path().to_owned();
+            let key_path = pending_path(&enroll.out);
             pending.write(&sealed)?;
             drop(out);
             let id = submission.request;
@@ -228,7 +235,11 @@ fn collect(host: &dyn Host, enroll: &Enroll, request: i64) -> Result<Output, Fai
     let key_path = enroll.key.as_deref().expect("clap requires a key");
     let authority = resolve_ca(host, &enroll.ca)?;
     let sealed = files::read(key_path)?;
-    let out = Reserved::new(&enroll.out, true)?;
+    let out = if enroll.replace {
+        Reserved::replacing(&enroll.out, true)?
+    } else {
+        Reserved::new(&enroll.out, true)?
+    };
     // The certificate first: while the request is still held there is
     // nothing to ask the passphrase for.
     let reply = call(

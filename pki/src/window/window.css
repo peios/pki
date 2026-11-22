@@ -1,0 +1,51 @@
+/* The shared settings layout draws nearly everything; these rules are the
+   Certificate Authority window's alone. */
+
+/* Values that run long: fingerprints, serial numbers, addresses. */
+.st-row .control .value.mono {
+    overflow-wrap: anywhere;
+}
+/* Facts that list several things, one to a line. */
+.st-row.fact .control .value {
+    white-space: pre-line;
+    text-align: end;
+}
+.st-row .control .st-button + .st-button,
+.st-row .control .st-pill + .st-button,
+.pki-beside {
+    margin-left: var(--space-2);
+}
+/* A name below another in its tree. */
+.st-row.link.pki-depth-2 .st-item { padding-left: 1.25rem; }
+.st-row.link.pki-depth-3 .st-item { padding-left: 2.5rem; }
+.st-row.link.pki-depth-4 .st-item { padding-left: 3.75rem; }
+/* Ticks for a list of choices, in two tidy columns, one when narrow. */
+.pki-ticks {
+    display: inline-grid;
+    grid-template-columns: repeat(2, auto);
+    justify-items: start;
+    gap: var(--space-2) var(--space-4);
+    vertical-align: middle;
+}
+.pki-tick {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--space-2);
+    white-space: nowrap;
+}
+.pki-ticks + .st-select {
+    margin-left: var(--space-3);
+}
+@media (max-width: 700px) {
+    .pki-ticks {
+        grid-template-columns: auto;
+    }
+    .pki-ticks + .st-select {
+        margin: var(--space-2) 0 0 0;
+    }
+}
+/* A field in a question takes the field's own weight, not its label's. */
+.st-more .fields .st-input,
+.st-more .fields .st-select {
+    font-weight: 400;
+}

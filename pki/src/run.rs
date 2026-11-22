@@ -4,6 +4,7 @@ use std::path::Path;
 
 use pki_keys::{KeyError, NewPassphrase};
 use pki_management::provision::Reservation;
+use pki_management::security;
 use pkid_core::{AuthorityInfo, Issuer, KeySpec, Passphrase, Reply, Request};
 use serde_json::json;
 use zeroize::Zeroizing;
@@ -560,6 +561,30 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
                 },
                 &what,
             )?;
+            Ok(Output {
+                text: show::authority_text(&authority),
+                json: json!({"changed": show::authority_json(&authority)}),
+            })
+        }
+
+        Ca::SetSecurity { ca, sddl } => {
+            let what = format!("set-security {ca}");
+            let security = config::parse_sddl(&sddl)?;
+            let authority = resolve_ca(host, &ca)?;
+            let authority = manage(
+                host,
+                &Request::SetAuthoritySecurity {
+                    ca: authority.id,
+                    security: security.clone(),
+                },
+                &what,
+            )?;
+            for warning in security::broad_ca_grants(&security).unwrap_or_default() {
+                host.warn(&warning);
+            }
+            if authority.granted & show::MANAGE == 0 {
+                host.warn("you can no longer manage this CA");
+            }
             Ok(Output {
                 text: show::authority_text(&authority),
                 json: json!({"changed": show::authority_json(&authority)}),

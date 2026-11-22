@@ -398,7 +398,8 @@ fn commit(
         &state.keys,
         state.store.as_ref().ok(),
         config,
-    )))
+        caller,
+    )?))
 }
 
 pub fn handle(
@@ -698,6 +699,25 @@ pub fn handle(
                 values,
                 remove: &[],
                 action: "configured",
+            };
+            commit(state, services, caller, change, None)
+        }
+
+        Request::SetAuthoritySecurity { ca, security } => {
+            let config = configured(state, &ca)?.clone();
+            require(caller, &config.security, CA_MANAGE)?;
+            let security = SecurityBlob::new(security);
+            caller
+                .checker()
+                .validate(&security)
+                .map_err(|error| bad(error.to_string()))?;
+            let mut values = Values::new();
+            values.insert("CaSecurity", RegData::Binary(security.as_bytes().to_vec()));
+            let change = Change {
+                id: &ca,
+                values,
+                remove: &[],
+                action: "secured",
             };
             commit(state, services, caller, change, None)
         }

@@ -75,12 +75,13 @@ has no CRL.
 
 --- field object.pkid.action
 type: str.enum
-values: created | imported | installed | configured | signed-subordinate | exported-key
+values: created | imported | installed | configured | secured | signed-subordinate | exported-key
 closed: true
 
 What was done to the CA: created with a new key, imported from a sealed key
 file, given the certificate it awaited, given new templates or distribution
-points, used to sign a subordinate CA elsewhere, or its key exported.
+points, given a new security descriptor, used to sign a subordinate CA
+elsewhere, or its key exported.
 
 --- field outcome.success
 type: bool
@@ -142,8 +143,8 @@ tier: standard
 gating: none
 cardinality: once per management operation
 
-An administrator created, imported, installed or reconfigured a CA, had it
-sign a subordinate CA elsewhere, or exported its key.
+An administrator created, imported, installed or reconfigured a CA, changed
+who may use it, had it sign a subordinate CA elsewhere, or exported its key.
 
 include: subject.token.sid, object.pkid.ca, object.pkid.action
 

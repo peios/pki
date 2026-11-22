@@ -11,6 +11,8 @@ mod issue;
 mod run;
 mod secret;
 mod show;
+#[cfg(feature = "window")]
+mod window;
 
 #[cfg(test)]
 mod tests;
@@ -31,6 +33,17 @@ fn main() -> ExitCode {
     // SAFETY: restoring the default disposition of one signal at startup.
     unsafe { libc::signal(libc::SIGPIPE, libc::SIG_DFL) };
     let args: Vec<OsString> = std::env::args_os().collect();
+    // The Certificate Authority window, as its launcher declaration
+    // (dev.peios.pkid.toml) starts it.
+    if args.len() == 2 && args[1] == "--window" {
+        #[cfg(feature = "window")]
+        return ExitCode::from(window::open() as u8);
+        #[cfg(not(feature = "window"))]
+        {
+            eprintln!("pki: this build has no window");
+            return ExitCode::FAILURE;
+        }
+    }
     let json = args
         .iter()
         .skip(1)

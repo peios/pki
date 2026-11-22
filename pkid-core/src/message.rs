@@ -160,6 +160,14 @@ pub enum Request {
         ca: String,
         passphrase: Option<Passphrase>,
     },
+    /// Replaces who may do what at `ca`: its `CaSecurity`, a self-relative
+    /// security descriptor. Needs Manage CA at the CA.
+    SetAuthoritySecurity {
+        ca: String,
+        security: Vec<u8>,
+    },
+    /// What the caller may do on this pkid beyond any one CA.
+    Access,
 }
 
 impl Request {
@@ -183,6 +191,8 @@ impl Request {
             Self::ExportKey { .. } => "export-key",
             Self::ConfigureAuthority { .. } => "configure-authority",
             Self::PublishCrl { .. } => "publish-crl",
+            Self::SetAuthoritySecurity { .. } => "set-authority-security",
+            Self::Access => "access",
         }
     }
 
@@ -190,7 +200,7 @@ impl Request {
         let mut map = MapWriter::new();
         map.str("op", self.op());
         match self {
-            Self::Authorities => {}
+            Self::Authorities | Self::Access => {}
             Self::CreateAuthority {
                 name,
                 key,
@@ -270,6 +280,9 @@ impl Request {
                 map.str("ca", ca)
                     .opt_bin("passphrase", passphrase.as_ref().map(Passphrase::expose));
             }
+            Self::SetAuthoritySecurity { ca, security } => {
+                map.str("ca", ca).bin("security", security);
+            }
             Self::Submit { ca, template, csr } => {
                 map.str("ca", ca).str("template", template).bin("csr", csr);
             }
@@ -338,6 +351,11 @@ impl Request {
         };
         let request = match fields.str("op")? {
             "authorities" => Self::Authorities,
+            "access" => Self::Access,
+            "set-authority-security" => Self::SetAuthoritySecurity {
+                ca: ca()?,
+                security: fields.bin("security")?.to_vec(),
+            },
             "create-authority" => Self::CreateAuthority {
                 name: fields.str("name")?.to_owned(),
                 key: decode_key_spec(&fields.map("key")?)?,
@@ -455,6 +473,17 @@ impl Request {
 pub struct TemplateInfo {
     pub id: String,
     pub name: String,
+    /// Whether the caller may enrol from it: its `EnrollSecurity` grants
+    /// them Enroll. The name policy still decides each request's names.
+    pub enroll: bool,
+}
+
+/// What the caller may do on this pkid beyond any one CA.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccessInfo {
+    /// Whether they may create and import CAs: `ManageSecurity` grants
+    /// them Manage CA.
+    pub create: bool,
 }
 
 /// A CA on this pkid.
@@ -468,6 +497,12 @@ pub struct AuthorityInfo {
     pub request: Option<Vec<u8>>,
     /// Where its key is kept, as `provider:locator`.
     pub key: String,
+    /// The rights the caller holds at the CA, from its `CaSecurity`: Read
+    /// (0x1), Request (0x2), Issue and Manage Certificates (0x4) and
+    /// Manage CA (0x8).
+    pub granted: u32,
+    /// Its `CaSecurity`, a self-relative security descriptor.
+    pub security: Vec<u8>,
     pub templates: Vec<TemplateInfo>,
     /// Whether pkid can sign with the CA's key unattended.
     pub key_available: bool,
@@ -692,6 +727,7 @@ pub enum Reply {
     SealedKey(Vec<u8>),
     /// The CRL a CA just signed and published.
     Crl(CrlInfo),
+    Access(AccessInfo),
 }
 
 impl Reply {
@@ -708,6 +744,7 @@ impl Reply {
             Self::Signed(_) => "signed",
             Self::SealedKey(_) => "sealed-key",
             Self::Crl(_) => "crl",
+            Self::Access(_) => "access",
         }
     }
 
@@ -780,6 +817,9 @@ impl Reply {
             Reply::Crl(crl) => {
                 map.raw("crl", &encode_crl(crl)?);
             }
+            Reply::Access(access) => {
+                map.bool("create", access.create);
+            }
         }
         map.finish()
     }
@@ -823,6 +863,9 @@ impl Reply {
             "signed" => Reply::Signed(fields.bin("certificate")?.to_vec()),
             "sealed-key" => Reply::SealedKey(fields.bin("sealed-key")?.to_vec()),
             "crl" => Reply::Crl(decode_crl(&fields.map("crl")?)?),
+            "access" => Reply::Access(AccessInfo {
+                create: fields.bool("create")?,
+            }),
             other => return Err(malformed(format!("reply kind {other}"))),
         };
         Ok(Ok(reply))
@@ -894,6 +937,7 @@ fn encode_authority(authority: &AuthorityInfo) -> Result<Vec<u8>, CodecError> {
             MapWriter::new()
                 .str("id", &template.id)
                 .str("name", &template.name)
+                .bool("enroll", template.enroll)
                 .finish()
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -903,6 +947,8 @@ fn encode_authority(authority: &AuthorityInfo) -> Result<Vec<u8>, CodecError> {
         .opt_bin("certificate", authority.certificate.as_deref())
         .opt_bin("request", authority.request.as_deref())
         .str("key", &authority.key)
+        .uint("granted", u64::from(authority.granted))
+        .bin("security", &authority.security)
         .array("templates", &templates)
         .bool("key-available", authority.key_available)
         .uint("crl-lifetime-days", u64::from(authority.crl_lifetime_days));
@@ -939,11 +985,15 @@ fn decode_authority_fields(fields: &Fields<'_>) -> Result<AuthorityInfo, CodecEr
         certificate: fields.opt_bin("certificate")?.map(<[u8]>::to_vec),
         request: fields.opt_bin("request")?.map(<[u8]>::to_vec),
         key: fields.str("key")?.to_owned(),
+        granted: u32::try_from(fields.uint("granted")?)
+            .map_err(|_| malformed("granted rights out of range"))?,
+        security: fields.bin("security")?.to_vec(),
         templates: fields.array("templates", |bytes| {
             let template = Fields::read(bytes)?;
             Ok(TemplateInfo {
                 id: template.str("id")?.to_owned(),
                 name: template.str("name")?.to_owned(),
+                enroll: template.bool("enroll")?,
             })
         })?,
         key_available: fields.bool("key-available")?,

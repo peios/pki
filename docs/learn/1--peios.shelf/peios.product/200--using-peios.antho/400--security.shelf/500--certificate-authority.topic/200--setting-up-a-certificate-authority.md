@@ -37,6 +37,9 @@ default configuration under `Machine\Software\Pki`: the Server and Device
 templates and the roots of the name trees. It only adds what is missing, so
 running it again changes nothing you have set.
 
+In the Certificate Authority window, the overview offers **Set Up** to an
+administrator until the machine is prepared.
+
 ## Create the root
 
 1. Create the root, with its key sealed in a file on the removable media:
@@ -132,3 +135,14 @@ pki ca install "Home Issuing" home-issuing.pem
 ```
 
 The CA issues nothing until its certificate is installed.
+
+## Use the Certificate Authority window
+
+**Add an Authority** in the window's sidebar makes each kind of CA these
+steps make: a **Root Authority**, one **Under an Authority Here**, one
+**Signed by an Authority Elsewhere**, or one imported from a backup with
+**Import From a Backup**. Its **Key Storage** is the Certificate Service's
+store, or a **Sealed File** with a passphrase. A CA's page has **Export
+Key**, **Sign a Subordinate Request**, and, while it waits for its
+certificate, **Save Request…** and **Install Certificate…**. Only someone
+with the right to create CAs sees **Add an Authority**.

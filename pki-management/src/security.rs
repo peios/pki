@@ -1,6 +1,6 @@
 //! The name trees' request descriptors: what a name inherits, folding the
 //! inherited entries into a descriptor written for it, and the grants that
-//! deserve a warning (PEI-1709, R1).
+//! deserve a warning (PEI-1709, R1), on names and on CAs.
 
 use peios::security::{sddl, AceFlags, AceType, SdBuilder, SdView, Sid, WellKnown};
 use pki_policy::{SecurityBlob, Values, NAME_REQUEST, NAME_REQUEST_WITH_APPROVAL};
@@ -105,6 +105,37 @@ pub fn broad_grants(security: &[u8]) -> peios::Result<Vec<String>> {
                     "{group} may now request these names without approval; prefer Request with approval (0x2)"
                 ));
             }
+        }
+    }
+    Ok(warnings)
+}
+
+/// The entries of a CA's descriptor that let a broad group approve,
+/// revoke or manage at the CA (R1): rights for a few trusted people.
+pub fn broad_ca_grants(security: &[u8]) -> peios::Result<Vec<String>> {
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    const OFFICER: u32 = 0x4;
+    const MANAGE: u32 = 0x8;
+    let view = SdView::parse(security)?;
+    let Some(dacl) = view.dacl() else {
+        return Ok(Vec::new());
+    };
+    let mut warnings = Vec::new();
+    for ace in dacl.iter() {
+        if ace.ace_type() != AceType::AccessAllowed {
+            continue;
+        }
+        let Some(group) = ace.sid().and_then(|sid| broad(&sid.to_string())) else {
+            continue;
+        };
+        if ace.mask() & (MANAGE | GENERIC_ALL) != 0 {
+            warnings.push(format!(
+                "{group} may now manage this CA, and so issue any certificate"
+            ));
+        } else if ace.mask() & OFFICER != 0 {
+            warnings.push(format!(
+                "{group} may now approve requests and revoke certificates at this CA"
+            ));
         }
     }
     Ok(warnings)

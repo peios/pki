@@ -117,6 +117,16 @@ pki ca set "Home Issuing" --template Server --template Device \
 A template's enrollment descriptor decides who can use it at all;
 `--enroll-security` changes it.
 
+## Use the Certificate Authority window
+
+The window's **Templates** and **Names** pages make the same changes.
+**Who Can Request** opens the permissions editor on a template's or a name's
+descriptor; for a name, it shows the entries it inherits from the name above
+it. A name's page sets its **Owner**, by account name, and **Inherit
+Again…** drops its own permissions. **Principal Domains** is at the top of
+**Names**. Each control appears only where your permissions in the Registry
+let you change it.
+
 ## Check the result
 
 Show a name to see its owner, its descriptor, and where the descriptor comes

@@ -134,6 +134,15 @@ pub enum Ca {
     },
     /// Change which templates a CA issues and where its CRL is published
     Set(Set),
+    /// Set who may do what at a CA
+    SetSecurity {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The descriptor, as SDDL
+        #[arg(value_name = "sddl")]
+        sddl: String,
+    },
     /// Sign and publish a new CRL now
     PublishCrl {
         /// The CA, by name or ID
@@ -309,7 +318,7 @@ pub enum TemplateCommand {
 
 /// A template's values, as given to create or change it. Each list given
 /// replaces the template's list.
-#[derive(Debug, Args)]
+#[derive(Debug, Default, Args)]
 pub struct TemplateFields {
     /// Give certificates an extended key usage; repeat for more
     #[arg(long = "purpose", value_name = "purpose")]
@@ -498,6 +507,10 @@ pub struct Enroll {
     /// Read the passphrase from a file
     #[arg(long, value_name = "file")]
     pub passphrase_file: Option<PathBuf>,
+    /// Replace the files written if they exist: the window's file dialog
+    /// has asked first. Not offered on the command line.
+    #[arg(skip)]
+    pub replace: bool,
 }
 
 /// Who signs a new CA's certificate.

@@ -98,6 +98,14 @@ impl AccessChecker for Person {
             .collect();
         Ok(SecurityBlob::new(kept.join("\n").into_bytes()))
     }
+
+    fn validate(&self, security: &SecurityBlob) -> Result<(), PolicyError> {
+        // The model's stand-in for a descriptor without an access list.
+        if security.as_bytes().is_empty() {
+            return Err(PolicyError::InvalidConfiguration("no access list".into()));
+        }
+        Ok(())
+    }
 }
 
 impl Principal for Person {
@@ -556,6 +564,89 @@ fn authorities_list_only_cas_the_caller_has_rights_at() {
         panic!("expected authorities");
     };
     assert!(listed.is_empty());
+}
+
+#[test]
+fn authorities_say_what_the_caller_may_do() {
+    let mut world = World::new();
+    let listed = |world: &mut World, caller: &Person| match world.call(Request::Authorities, caller)
+    {
+        Ok(Reply::Authorities(listed)) => listed,
+        other => panic!("expected authorities, got {other:?}"),
+    };
+    let user = &listed(&mut world, &Person::user(JACK))[0];
+    assert_eq!(user.granted, 0x2);
+    assert!(user.templates[0].enroll);
+    assert!(!user.security.is_empty());
+    assert_eq!(listed(&mut world, &Person::admin(ALEX))[0].granted, 0xf);
+
+    // A service may use the CA without being able to enrol from the
+    // template, which grants only authenticated users.
+    let service = Person::new(&[RADIUS, "S-1-5-6"]);
+    let ca = "issuing".to_string();
+    world
+        .call(
+            Request::SetAuthoritySecurity {
+                ca: ca.clone(),
+                security: sd(&["S-1-5-6:2", &format!("{ADMINISTRATORS}:15")])
+                    .as_bytes()
+                    .to_vec(),
+            },
+            &Person::admin(ALEX),
+        )
+        .unwrap();
+    let seen = &listed(&mut world, &service)[0];
+    assert_eq!(seen.granted, 0x2);
+    assert!(!seen.templates[0].enroll);
+}
+
+#[test]
+fn only_managers_may_create_authorities() {
+    let mut world = World::new();
+    let access = |world: &mut World, caller: &Person| match world.call(Request::Access, caller) {
+        Ok(Reply::Access(access)) => access.create,
+        other => panic!("expected access, got {other:?}"),
+    };
+    assert!(access(&mut world, &Person::admin(ALEX)));
+    assert!(!access(&mut world, &Person::user(JACK)));
+}
+
+#[test]
+fn managers_change_who_may_use_a_ca() {
+    let mut world = World::new();
+    let security = sd(&[&format!("{JACK}:1"), &format!("{ADMINISTRATORS}:15")])
+        .as_bytes()
+        .to_vec();
+    let change = |security: Vec<u8>| Request::SetAuthoritySecurity {
+        ca: "issuing".into(),
+        security,
+    };
+    assert_eq!(
+        world.code(change(security.clone()), &Person::user(JACK)),
+        ErrorCode::AccessDenied
+    );
+    assert_eq!(
+        world.code(change(Vec::new()), &Person::admin(ALEX)),
+        ErrorCode::BadRequest
+    );
+
+    let changed = authority(world.call(change(security.clone()), &Person::admin(ALEX)));
+    assert_eq!(changed.security, security);
+    assert_eq!(changed.granted, 0xf);
+    assert!(matches!(
+        world.audit.0.borrow().last(),
+        Some(Event::Managed {
+            action: "secured",
+            ..
+        })
+    ));
+    let Reply::Authorities(listed) = world
+        .call(Request::Authorities, &Person::user(JACK))
+        .unwrap()
+    else {
+        panic!("expected authorities");
+    };
+    assert_eq!(listed[0].granted, 0x1);
 }
 
 #[test]

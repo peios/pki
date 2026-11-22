@@ -68,4 +68,9 @@ pub trait AccessChecker {
     /// The descriptor a name with no node of its own receives from the node
     /// directly above it, by ordinary inheritance of container entries.
     fn inherit(&self, parent: &SecurityBlob) -> Result<SecurityBlob, PolicyError>;
+
+    /// Refuses `security` unless it is a well-formed descriptor that grants
+    /// only what its entries say: one with an access list. A descriptor
+    /// without one grants everyone every right.
+    fn validate(&self, security: &SecurityBlob) -> Result<(), PolicyError>;
 }

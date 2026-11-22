@@ -10,13 +10,12 @@ use std::collections::HashMap;
 use pki_core::{RevocationReason, SerialNumber, Sid};
 use pki_keys::{KeyError, KeyProviders, OpenKey};
 use pki_pipeline::{
-    Authority, Directory, Pipeline, PipelineError, Principal, Submission, CA_MANAGE, CA_OFFICER,
-    CA_READ, CA_REQUEST,
+    Authority, Directory, Pipeline, PipelineError, Principal, Submission, CA_ALL, CA_MANAGE,
 };
-use pki_policy::Values;
+use pki_policy::{SecurityBlob, Values, TEMPLATE_ENROLL};
 use pki_store::{CertificateFilter, RequestFilter, RequestId, RequestStatus, Store};
 use pkid_core::{
-    AuthorityInfo, CertificateInfo, ErrorCode, Outcome, Reply, Request, RequestInfo,
+    AccessInfo, AuthorityInfo, CertificateInfo, ErrorCode, Outcome, Reply, Request, RequestInfo,
     RevocationInfo, SubmissionInfo, TemplateInfo, WireError,
 };
 use time::OffsetDateTime;
@@ -201,6 +200,7 @@ pub fn handle(
     }
     match request {
         Request::Authorities => authorities(state, caller),
+        Request::Access => access(state, caller),
         Request::PublishCrl { ca, passphrase } => {
             crl::handle_publish(state, &ca, passphrase.as_ref(), caller, services, now)
         }
@@ -215,7 +215,8 @@ pub fn handle(
         | Request::InstallAuthority { .. }
         | Request::ImportAuthority { .. }
         | Request::ExportKey { .. }
-        | Request::ConfigureAuthority { .. } => {
+        | Request::ConfigureAuthority { .. }
+        | Request::SetAuthoritySecurity { .. } => {
             manage::handle(state, request, caller, services, now)
         }
         request => pipeline_request(state, request, caller, services, now),
@@ -396,55 +397,74 @@ fn authorities(state: &State, caller: &dyn Principal) -> Result<Reply, WireError
     let Ok(loaded) = &state.loaded else {
         unreachable!("checked by handle");
     };
-    let any = CA_READ | CA_REQUEST | CA_OFFICER | CA_MANAGE;
     let mut listed = Vec::new();
     for authority in &loaded.authorities {
-        let granted = caller
-            .checker()
-            .granted(&authority.security, any, None)
-            .map_err(|error| WireError::new(ErrorCode::Internal, error.to_string()))?;
-        if granted != 0 {
-            listed.push(authority_info(
-                loaded,
-                &state.keys,
-                state.store.as_ref().ok(),
-                authority,
-            ));
+        let info = authority_info(
+            loaded,
+            &state.keys,
+            state.store.as_ref().ok(),
+            authority,
+            caller,
+        )?;
+        if info.granted != 0 {
+            listed.push(info);
         }
     }
     Ok(Reply::Authorities(listed))
 }
 
+/// What the caller may do beyond any one CA.
+fn access(state: &State, caller: &dyn Principal) -> Result<Reply, WireError> {
+    let Ok(loaded) = &state.loaded else {
+        unreachable!("checked by handle");
+    };
+    let granted = caller
+        .checker()
+        .granted(&loaded.manage_security, CA_MANAGE, None)
+        .map_err(|error| WireError::new(ErrorCode::Internal, error.to_string()))?;
+    Ok(Reply::Access(AccessInfo {
+        create: granted & CA_MANAGE == CA_MANAGE,
+    }))
+}
+
+/// A CA as `caller` sees it: with the rights they hold at it, and whether
+/// they may enrol from each template it offers.
 pub(crate) fn authority_info(
     loaded: &Loaded,
     keys: &HashMap<String, OpenKey>,
     store: Option<&Store>,
     authority: &AuthorityConfig,
-) -> AuthorityInfo {
-    AuthorityInfo {
+    caller: &dyn Principal,
+) -> Result<AuthorityInfo, WireError> {
+    let check = |security: &SecurityBlob, desired: u32| {
+        caller
+            .checker()
+            .granted(security, desired, None)
+            .map_err(|error| WireError::new(ErrorCode::Internal, error.to_string()))
+    };
+    let mut templates = Vec::new();
+    for id in &authority.templates {
+        if let Some(template) = loaded.configuration.templates.get(id) {
+            templates.push(TemplateInfo {
+                id: id.clone(),
+                name: template.name.clone(),
+                enroll: check(&template.enroll_security, TEMPLATE_ENROLL)? & TEMPLATE_ENROLL != 0,
+            });
+        }
+    }
+    Ok(AuthorityInfo {
         id: authority.id.clone(),
         name: authority.name.clone(),
         certificate: authority.certificate.clone(),
         request: authority.request.clone(),
         key: authority.key.to_string(),
-        templates: authority
-            .templates
-            .iter()
-            .filter_map(|id| {
-                loaded
-                    .configuration
-                    .templates
-                    .get(id)
-                    .map(|template| TemplateInfo {
-                        id: id.clone(),
-                        name: template.name.clone(),
-                    })
-            })
-            .collect(),
+        granted: check(&authority.security, CA_ALL)?,
+        security: authority.security.as_bytes().to_vec(),
+        templates,
         key_available: keys.contains_key(&authority.id),
         crl_lifetime_days: authority.crl_lifetime_days,
         crl: crl::latest(store, &authority.id),
-    }
+    })
 }
 
 fn listing_limit(limit: u32) -> usize {

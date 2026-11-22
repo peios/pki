@@ -1,10 +1,10 @@
 //! The control wire's codec.
 
 use pkid_core::{
-    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo, ErrorCode,
-    FrameError, Issuer, KeySpec, Outcome, Passphrase, Reply, Request, RequestInfo, RequestQuery,
-    RequestStatus, RevocationInfo, SubmissionInfo, TemplateInfo, WireError, HTTPD_SERVICE_NAME,
-    HTTPD_SERVICE_SID, MAX_LISTING, SERVICE_NAME, SERVICE_SID,
+    read_frame, write_frame, AccessInfo, AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo,
+    ErrorCode, FrameError, Issuer, KeySpec, Outcome, Passphrase, Reply, Request, RequestInfo,
+    RequestQuery, RequestStatus, RevocationInfo, SubmissionInfo, TemplateInfo, WireError,
+    HTTPD_SERVICE_NAME, HTTPD_SERVICE_SID, MAX_LISTING, SERVICE_NAME, SERVICE_SID,
 };
 use sha1::{Digest, Sha1};
 
@@ -182,6 +182,11 @@ fn management_requests_round_trip() {
             ca: "issuing".into(),
             passphrase: None,
         },
+        Request::SetAuthoritySecurity {
+            ca: "issuing".into(),
+            security: vec![1, 0, 4, 0x80],
+        },
+        Request::Access,
     ];
     for request in requests {
         let decoded = Request::decode(&request.encode().unwrap()).unwrap();
@@ -257,9 +262,12 @@ fn replies_round_trip() {
                 certificate: Some(vec![0x30, 0x01]),
                 request: None,
                 key: "service:issuing".into(),
+                granted: 0x7,
+                security: vec![1, 0, 4, 0x80],
                 templates: vec![TemplateInfo {
                     id: "server".into(),
                     name: "Server".into(),
+                    enroll: true,
                 }],
                 key_available: true,
                 crl_lifetime_days: 7,
@@ -275,6 +283,8 @@ fn replies_round_trip() {
                 certificate: None,
                 request: Some(vec![0x30, 0x02]),
                 key: "service:lab".into(),
+                granted: 0x2,
+                security: Vec::new(),
                 templates: Vec::new(),
                 key_available: true,
                 crl_lifetime_days: 180,
@@ -287,6 +297,8 @@ fn replies_round_trip() {
             next_update: 1_815_552_000,
         })),
         Ok(Reply::Signed(vec![0x30, 0x03])),
+        Ok(Reply::Access(AccessInfo { create: true })),
+        Ok(Reply::Access(AccessInfo { create: false })),
         Ok(Reply::SealedKey(b"PEIOSKEY".to_vec())),
         Ok(Reply::Submission(SubmissionInfo {
             request: 4,

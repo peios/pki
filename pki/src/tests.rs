@@ -198,9 +198,12 @@ fn authority(id: &str, name: &str, key: &str) -> AuthorityInfo {
         certificate: Some(vec![0x30, 0x00]),
         request: None,
         key: key.into(),
+        granted: 0xf,
+        security: Vec::new(),
         templates: vec![TemplateInfo {
             id: "t-server".into(),
             name: "Server".into(),
+            enroll: true,
         }],
         key_available: !key.starts_with("file:"),
         crl_lifetime_days: if key.starts_with("file:") { 180 } else { 7 },
@@ -717,8 +720,10 @@ fn submission(outcome: pkid_core::Outcome, reasons: &[&str]) -> Reply {
     })
 }
 
-fn request_file() -> PathBuf {
-    let path = scratch("leaf.csr");
+/// A request file of its own for each test: tests run at once, and
+/// `scratch` removes what is there.
+fn request_file(name: &str) -> PathBuf {
+    let path = scratch(name);
     std::fs::write(
         &path,
         crate::files::pem(crate::files::REQUEST, &[0x30, 0x00]),
@@ -729,7 +734,7 @@ fn request_file() -> PathBuf {
 
 #[test]
 fn submit_names_the_template_among_those_the_ca_offers() {
-    let csr = request_file();
+    let csr = request_file("leaf-2.csr");
     let host = fake().replying(submission(
         pkid_core::Outcome::Issued(vec![0x30, 0x00]),
         &[],
@@ -764,7 +769,7 @@ fn submit_names_the_template_among_those_the_ca_offers() {
 
 #[test]
 fn a_held_request_says_how_to_collect_its_certificate() {
-    let csr = request_file();
+    let csr = request_file("leaf-3.csr");
     let out = scratch("held.pem");
     let host = fake().replying(submission(
         pkid_core::Outcome::Pending,
@@ -791,7 +796,7 @@ fn a_held_request_says_how_to_collect_its_certificate() {
 
 #[test]
 fn a_refused_request_fails_with_its_reasons() {
-    let csr = request_file();
+    let csr = request_file("leaf-4.csr");
     let host = fake().replying(submission(
         pkid_core::Outcome::Denied,
         &["name not allowed"],
@@ -1469,6 +1474,42 @@ fn crl_lifetimes_are_set_with_ca_set() {
 }
 
 #[test]
+fn ca_permissions_are_set_and_broad_grants_warned_of() {
+    let mut changed = authority("x", "Issuing", "service:x");
+    changed.granted = 0x3;
+    let host = fake().replying(Reply::Authority(changed));
+    let output = running(
+        &host,
+        "ca set-security Issuing D:(A;;0x2;;;AU)(A;;0xc;;;WD)",
+    )
+    .unwrap();
+    let Request::SetAuthoritySecurity { security, .. } = host.sent() else {
+        panic!()
+    };
+    // pki writes SYSTEM as the owner and group where the SDDL names none.
+    let text = peios::security::sddl::format(&security).unwrap();
+    assert!(text.starts_with("O:SYG:SY"), "{text}");
+    let warnings = host.warnings.borrow();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("Everyone may now manage")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w == "you can no longer manage this CA"),
+        "{warnings:?}"
+    );
+    assert!(
+        output.text.contains("Your access:  read, request"),
+        "{}",
+        output.text
+    );
+}
+
+#[test]
 fn a_crl_close_to_expiry_is_flagged() {
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -1531,4 +1572,94 @@ fn principal_domains_are_set_and_checked() {
     let output = running(&fake(), "name domains").unwrap();
     assert!(output.text.starts_with("No domains"), "{}", output.text);
     assert!(writes(&fake()).is_empty());
+}
+
+// The window's commands: the same as the terminal's, with what the person
+// typed answering exactly the prompts they ask.
+
+#[cfg(feature = "window")]
+mod window {
+    use super::*;
+    use crate::window::act::{self, Enrolled, Enrolment};
+
+    fn typed(text: &str) -> Zeroizing<String> {
+        Zeroizing::new(text.to_owned())
+    }
+
+    #[test]
+    fn publishing_asks_for_a_sealed_keys_passphrase_only() {
+        let crl = Reply::Crl(pkid_core::CrlInfo {
+            number: 4,
+            this_update: 0,
+            next_update: 0,
+        });
+        let host = fake().replying(crl.clone());
+        let said = act::publish(&host, "Root", Some(typed(PASSPHRASE))).unwrap();
+        assert_eq!(said, "Revocation list 4 published.");
+        let Request::PublishCrl { passphrase, .. } = host.sent() else {
+            panic!()
+        };
+        assert_eq!(passphrase.unwrap().expose(), PASSPHRASE.as_bytes());
+
+        let host = fake().replying(crl);
+        act::publish(&host, "Issuing", None).unwrap();
+        // A sealed key with nothing typed fails as a missing terminal does,
+        // before pkid is asked anything.
+        let host = fake();
+        let refused = act::publish(&host, "Root", None).unwrap_err();
+        assert_eq!(refused, "Nothing was typed for it.");
+    }
+
+    #[test]
+    fn enrolling_answers_the_new_passphrase_twice_and_replaces_the_file() {
+        let ca = std::rc::Rc::new(TestCa::new());
+        let host = enrolling(&ca, "issued");
+        let out = scratch("window.p12");
+        std::fs::write(&out, b"an older file the dialog asked to replace").unwrap();
+        let enrolment = Enrolment {
+            ca: "Issuing".into(),
+            template: "Server".into(),
+            dns: vec!["www.lab.home".into()],
+            emails: Vec::new(),
+            upns: Vec::new(),
+            algorithm: "ecdsa-p256".into(),
+            out: out.clone(),
+        };
+        assert_eq!(
+            act::enrol(&host, &enrolment, typed(PASSPHRASE)).unwrap(),
+            Enrolled::Saved
+        );
+        assert_eq!(std::fs::read(&out).unwrap()[0], 0x30);
+        std::fs::remove_file(&out).unwrap();
+
+        let host = enrolling(&ca, "pending");
+        let held = act::enrol(&host, &enrolment, typed(PASSPHRASE)).unwrap();
+        let Enrolled::Held { request: 42, key } = held else {
+            panic!("{held:?}")
+        };
+        assert_eq!(&std::fs::read(&key).unwrap()[..8], b"PEIOSKEY");
+        std::fs::remove_file(key).unwrap();
+    }
+
+    #[test]
+    fn failures_are_said_as_the_window_says_things() {
+        let denied =
+            crate::failure::Failure::new(Kind::Denied, "access denied").context("approve 42");
+        assert_eq!(
+            act::failed("approve request #42", &denied),
+            "You don't have permission to approve request #42."
+        );
+        let other =
+            crate::failure::Failure::failed("request 42 is not pending").context("approve 42");
+        assert_eq!(
+            act::failed("approve request #42", &other),
+            "Request 42 is not pending."
+        );
+        let named = crate::failure::Failure::failed("lab.home may not be requested")
+            .context("enroll lab.home");
+        assert_eq!(
+            act::failed("request it", &named),
+            "lab.home may not be requested."
+        );
+    }
 }
