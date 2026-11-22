@@ -53,6 +53,9 @@ pub fn read_der(path: &Path, label: &str) -> Result<Vec<u8>, Failure> {
 pub struct Reserved {
     path: PathBuf,
     file: Option<File>,
+    /// Where the contents go once written, for a file that replaces
+    /// another: `path` is then a temporary file beside it.
+    replaces: Option<PathBuf>,
 }
 
 impl Reserved {
@@ -68,7 +71,25 @@ impl Reserved {
         Ok(Self {
             path: path.to_owned(),
             file: Some(file),
+            replaces: None,
         })
+    }
+
+    /// Like [`Reserved::new`], but `path` may exist: whatever is there is
+    /// replaced whole once the new contents are written, and left alone if
+    /// they aren't. For the window, whose file dialog has already asked
+    /// the person whether to replace it.
+    pub fn replacing(path: &Path, private: bool) -> Result<Self, Failure> {
+        let name = path
+            .file_name()
+            .ok_or_else(|| Failure::usage(format!("{} is not a file", path.display())))?;
+        let mut temporary = name.to_owned();
+        temporary.push(format!(".pki-{}", std::process::id()));
+        let temporary = path.with_file_name(temporary);
+        let _ = std::fs::remove_file(&temporary);
+        let mut reserved = Self::new(&temporary, private)?;
+        reserved.replaces = Some(path.to_owned());
+        Ok(reserved)
     }
 
     pub fn path(&self) -> &Path {
@@ -79,9 +100,14 @@ impl Reserved {
         let mut file = self.file.take().expect("written once");
         file.write_all(contents)
             .and_then(|()| file.sync_all())
+            .and_then(|()| match &self.replaces {
+                Some(target) => std::fs::rename(&self.path, target),
+                None => Ok(()),
+            })
             .map_err(|error| {
                 let _ = std::fs::remove_file(&self.path);
-                Failure::io(&error).context(self.path.display())
+                let shown = self.replaces.as_ref().unwrap_or(&self.path);
+                Failure::io(&error).context(shown.display())
             })
     }
 }
@@ -113,6 +139,35 @@ mod tests {
         let dir = std::env::temp_dir().join(format!("pki-files-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         dir.join(name)
+    }
+
+    #[test]
+    fn a_replacing_file_replaces_only_once_written() {
+        let path = scratch("replaced.p12");
+        std::fs::write(&path, b"old").unwrap();
+        assert!(
+            Reserved::new(&path, true).is_err(),
+            "pki itself never replaces"
+        );
+        drop(Reserved::replacing(&path, true).unwrap());
+        assert_eq!(std::fs::read(&path).unwrap(), b"old");
+        Reserved::replacing(&path, true)
+            .unwrap()
+            .write(b"new")
+            .unwrap();
+        assert_eq!(std::fs::read(&path).unwrap(), b"new");
+        let leftovers = std::fs::read_dir(path.parent().unwrap())
+            .unwrap()
+            .filter(|entry| {
+                entry
+                    .as_ref()
+                    .unwrap()
+                    .file_name()
+                    .to_string_lossy()
+                    .starts_with("replaced.p12.pki-")
+            })
+            .count();
+        assert_eq!(leftovers, 0);
     }
 
     #[test]

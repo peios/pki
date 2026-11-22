@@ -337,6 +337,21 @@ fn attention(window: &Window) -> String {
             &button,
         ));
     }
+    for (held, name) in &window.seen.ready {
+        let id = held.request.to_string();
+        rows.push_str(&settings::item(
+            &settings::icon(Glyph::Certificate, Tile::Green),
+            &format!("Your certificate for {name} is ready"),
+            &[("Save it with the key kept for it.", false)],
+            &settings::button(
+                "Open",
+                "request",
+                &[("ca", held.ca.as_str()), ("id", id.as_str())],
+                Kind::Plain,
+                enabled,
+            ),
+        ));
+    }
     for authority in window.seen.authorities() {
         let values = [("ca", authority.id.as_str())];
         let waiting = window.seen.waiting.get(&authority.id).map_or(0, Vec::len);

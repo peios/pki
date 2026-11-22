@@ -12,12 +12,17 @@
 //! Its sections are an overview, requesting a certificate, the requests and
 //! certificates of the CAs, each CA, and the templates and name trees.
 
+pub(crate) mod act;
 mod authority;
 mod describe;
+mod doing;
 mod enrol;
+mod held;
 mod issued;
+mod manage;
 mod names;
 mod overview;
+mod permissions;
 mod seen;
 mod service;
 mod templates;
@@ -34,6 +39,7 @@ use gxwi::settings::{self, Glyph, Tile};
 use gxwi::{escape, App, Facts, Fields, Live, Surface, Value};
 use pkid_core::{AuthorityInfo, CertificateInfo, RequestInfo, RequestStatus};
 
+use self::doing::Asking;
 use self::seen::{Person, Seen, Trouble};
 
 // The window's icon, named for its declaration, dev.peios.pkid.toml (PGSS
@@ -72,6 +78,11 @@ pub enum Page {
     Names,
     /// A name, as people write it: `lab.home`, `jack@home`, `@home`, `.`.
     Name(String),
+    NewAuthority,
+    /// Signing a subordinate's request with this CA.
+    Sign(String),
+    /// Exporting this CA's key.
+    ExportKey(String),
 }
 
 impl Page {
@@ -82,7 +93,8 @@ impl Page {
             Page::Enrol => "enrol".into(),
             Page::Requests | Page::Request { .. } => "requests".into(),
             Page::Certificates | Page::Certificate { .. } => "certificates".into(),
-            Page::Authority(id) => format!("authority:{id}"),
+            Page::Authority(id) | Page::Sign(id) | Page::ExportKey(id) => format!("authority:{id}"),
+            Page::NewAuthority => "new-authority".into(),
             Page::Templates | Page::Template(_) => "templates".into(),
             Page::Names | Page::Name(_) => "names".into(),
         }
@@ -96,6 +108,7 @@ impl Page {
             "certificates" => Page::Certificates,
             "templates" => Page::Templates,
             "names" => Page::Names,
+            "new-authority" => Page::NewAuthority,
             _ => Page::Authority(section.strip_prefix("authority:")?.to_string()),
         })
     }
@@ -131,6 +144,12 @@ pub struct Window {
     shown: usize,
     busy: bool,
     said: Option<Result<String, String>>,
+    /// The question open under a row, if one is.
+    asking: Option<Asking>,
+    /// Whether the file dialog is open.
+    choosing: bool,
+    /// The permissions editors open from the window.
+    editors: Vec<gxwi_sd_editor::Editor>,
 }
 
 impl Window {
@@ -145,6 +164,9 @@ impl Window {
             shown: PAGE_ROWS,
             busy: false,
             said: None,
+            asking: None,
+            choosing: false,
+            editors: Vec::new(),
         }
     }
 
@@ -197,7 +219,47 @@ impl Window {
         }
         self.page = page;
         self.said = None;
+        self.asking = None;
+        doing::forget(fields);
+        self.fill(fields);
         self.reload(fields);
+    }
+
+    /// Sets the fields of the form on the page from what it changes.
+    fn fill(&self, fields: &mut Fields) {
+        match &self.page {
+            Page::Authority(id) => {
+                if let Some(authority) = self.seen.authority(id) {
+                    manage::fill_issuing(self, authority, fields);
+                }
+            }
+            Page::NewAuthority => {
+                for name in [
+                    "new-name",
+                    "new-crls",
+                    "new-key-file",
+                    "new-certificate",
+                    "new-sealed",
+                ] {
+                    fields.set(name, "");
+                }
+                fields.set("new-kind", "root");
+                fields.set("new-keep", "service");
+                manage::fill_new(fields);
+            }
+            Page::Sign(_) => {
+                for name in ["sign-request", "sign-name", "sign-out"] {
+                    fields.set(name, "");
+                }
+                fields.set(
+                    "sign-lifetime",
+                    &crate::cli::SUBORDINATE_LIFETIME_DAYS.to_string(),
+                );
+                fields.set("sign-path", "0");
+            }
+            Page::ExportKey(_) => fields.set("key-out", ""),
+            _ => {}
+        }
     }
 
     /// Keeps the Authority field showing the CA the lists are of: the page
@@ -355,7 +417,8 @@ impl Window {
                 Tile::Blue,
                 &current,
             ));
-            if !authorities.is_empty() {
+            let create = self.seen.pkid.as_ref().is_ok_and(|pkid| pkid.create);
+            if !authorities.is_empty() || create {
                 side.push_str("<h3>Authorities</h3>");
             }
             for authority in authorities {
@@ -365,6 +428,16 @@ impl Window {
                     &authority::summary(authority),
                     Glyph::Shield,
                     authority::tile(authority),
+                    &current,
+                ));
+            }
+            if create {
+                side.push_str(&nav(
+                    "new-authority",
+                    "Add an Authority",
+                    "Create one, or import a backup",
+                    Glyph::Shield,
+                    Tile::Slate,
                     &current,
                 ));
             }
@@ -464,6 +537,15 @@ impl Live for Window {
             Page::Template(id) => templates::page(self, id),
             Page::Names => names::list(self, fields),
             Page::Name(name) => names::page(self, name),
+            Page::NewAuthority => manage::new_page(self, fields),
+            Page::Sign(id) => match self.seen.authority(id) {
+                Some(authority) => manage::sign_page(self, authority),
+                None => overview::page(self),
+            },
+            Page::ExportKey(id) => match self.seen.authority(id) {
+                Some(authority) => manage::export_page(self, authority),
+                None => overview::page(self),
+            },
         };
         let aside = if self.busy { "Working…" } else { "" };
         format!(
@@ -481,6 +563,7 @@ impl Live for Window {
                 self.reload(fields);
             }
             "find" | "show" | "show-certificates" => self.shown = PAGE_ROWS,
+            "new-kind" => manage::fill_new(fields),
             _ => {}
         }
     }
@@ -523,7 +606,8 @@ impl Live for Window {
             "template" => self.open(Page::Template(text("id")), fields),
             "name" => self.open(Page::Name(text("name")), fields),
             "back" => {
-                let page = match self.page {
+                let page = match &self.page {
+                    Page::Sign(ca) | Page::ExportKey(ca) => Page::Authority(ca.clone()),
                     Page::Request { .. } => Page::Requests,
                     Page::Certificate { .. } => Page::Certificates,
                     Page::Template(_) => Page::Templates,
@@ -557,6 +641,109 @@ impl Live for Window {
             "refresh" => {
                 self.listing = Listing::default();
                 self.reload(fields);
+            }
+            "cancel" => self.cancel(fields),
+            "choose" if !self.busy => self.choose_for(text("field"), &text("for"), fields),
+            "issuing" if !self.busy => {
+                if let Page::Authority(ca) = &self.page {
+                    let ca = ca.clone();
+                    self.issuing(ca, fields);
+                }
+            }
+            "create" if !self.busy => self.create(fields),
+            "sign" if !self.busy => match &self.page {
+                Page::Sign(ca) => {
+                    let ca = ca.clone();
+                    self.sign(ca, fields);
+                }
+                _ => self.open(Page::Sign(text("ca")), fields),
+            },
+            "export-key" if !self.busy => match &self.page {
+                Page::ExportKey(ca) => {
+                    let ca = ca.clone();
+                    self.export_key(ca, fields);
+                }
+                _ => self.open(Page::ExportKey(text("ca")), fields),
+            },
+            "install" if !self.busy => self.install(text("ca")),
+            "ca-permissions" => self.edit_ca_permissions(&text("ca")),
+            "approve" if !self.busy => {
+                if let Ok(id) = text("id").parse() {
+                    self.approve(text("ca"), id, fields);
+                }
+            }
+            "deny" if !self.busy => {
+                if let Ok(id) = text("id").parse() {
+                    self.ask(Asking::Deny { ca: text("ca"), id }, fields);
+                }
+            }
+            "deny-confirm" if !self.busy => self.deny(fields),
+            "revoke" if !self.busy => self.ask(
+                Asking::Revoke {
+                    ca: text("ca"),
+                    serial: text("serial"),
+                },
+                fields,
+            ),
+            "revoke-confirm" if !self.busy => self.revoke(fields),
+            "publish" if !self.busy => self.publish(text("ca"), fields),
+            "collect" if !self.busy => {
+                if let Ok(id) = text("id").parse() {
+                    self.ask(Asking::Collect { ca: text("ca"), id }, fields);
+                }
+            }
+            "collect-confirm" if !self.busy => self.collect(fields),
+            "forget-held" if !self.busy => {
+                if let Ok(id) = text("id").parse() {
+                    self.forget_held(text("ca"), id, fields);
+                }
+            }
+            "setup" if !self.busy && self.seen.may.setup => self.setup(fields),
+            "enrol" if !self.busy => self.enrol(fields),
+            "choose-out" if !self.busy => self.choose_out(fields),
+            "choose-csr" if !self.busy => self.choose_csr(),
+            "export" => {
+                let found = self.listing.certificates.as_ref().and_then(|list| {
+                    list.as_ref()
+                        .ok()?
+                        .iter()
+                        .find(|c| crate::show::hex(&c.serial) == text("serial"))
+                        .cloned()
+                });
+                if let Some(certificate) = found {
+                    let name = words::certificate_name(&certificate.der)
+                        .unwrap_or_else(|| "certificate".into());
+                    self.export(
+                        "Export the Certificate",
+                        &format!("{name}.pem"),
+                        crate::files::CERTIFICATE,
+                        certificate.der,
+                    );
+                }
+            }
+            "export-ca" => {
+                if let Some(authority) = self.seen.authority(&text("ca")).cloned() {
+                    if let Some(der) = authority.certificate {
+                        self.export(
+                            "Export the Authority's Certificate",
+                            &format!("{}.pem", authority.name),
+                            crate::files::CERTIFICATE,
+                            der,
+                        );
+                    }
+                }
+            }
+            "save-ca-request" => {
+                if let Some(authority) = self.seen.authority(&text("ca")).cloned() {
+                    if let Some(der) = authority.request {
+                        self.export(
+                            "Save the Authority's Request",
+                            &format!("{}.csr", authority.name),
+                            crate::files::REQUEST,
+                            der,
+                        );
+                    }
+                }
             }
             _ => {}
         }

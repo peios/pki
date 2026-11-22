@@ -1573,3 +1573,93 @@ fn principal_domains_are_set_and_checked() {
     assert!(output.text.starts_with("No domains"), "{}", output.text);
     assert!(writes(&fake()).is_empty());
 }
+
+// The window's commands: the same as the terminal's, with what the person
+// typed answering exactly the prompts they ask.
+
+#[cfg(feature = "window")]
+mod window {
+    use super::*;
+    use crate::window::act::{self, Enrolled, Enrolment};
+
+    fn typed(text: &str) -> Zeroizing<String> {
+        Zeroizing::new(text.to_owned())
+    }
+
+    #[test]
+    fn publishing_asks_for_a_sealed_keys_passphrase_only() {
+        let crl = Reply::Crl(pkid_core::CrlInfo {
+            number: 4,
+            this_update: 0,
+            next_update: 0,
+        });
+        let host = fake().replying(crl.clone());
+        let said = act::publish(&host, "Root", Some(typed(PASSPHRASE))).unwrap();
+        assert_eq!(said, "Revocation list 4 published.");
+        let Request::PublishCrl { passphrase, .. } = host.sent() else {
+            panic!()
+        };
+        assert_eq!(passphrase.unwrap().expose(), PASSPHRASE.as_bytes());
+
+        let host = fake().replying(crl);
+        act::publish(&host, "Issuing", None).unwrap();
+        // A sealed key with nothing typed fails as a missing terminal does,
+        // before pkid is asked anything.
+        let host = fake();
+        let refused = act::publish(&host, "Root", None).unwrap_err();
+        assert_eq!(refused, "Nothing was typed for it.");
+    }
+
+    #[test]
+    fn enrolling_answers_the_new_passphrase_twice_and_replaces_the_file() {
+        let ca = std::rc::Rc::new(TestCa::new());
+        let host = enrolling(&ca, "issued");
+        let out = scratch("window.p12");
+        std::fs::write(&out, b"an older file the dialog asked to replace").unwrap();
+        let enrolment = Enrolment {
+            ca: "Issuing".into(),
+            template: "Server".into(),
+            dns: vec!["www.lab.home".into()],
+            emails: Vec::new(),
+            upns: Vec::new(),
+            algorithm: "ecdsa-p256".into(),
+            out: out.clone(),
+        };
+        assert_eq!(
+            act::enrol(&host, &enrolment, typed(PASSPHRASE)).unwrap(),
+            Enrolled::Saved
+        );
+        assert_eq!(std::fs::read(&out).unwrap()[0], 0x30);
+        std::fs::remove_file(&out).unwrap();
+
+        let host = enrolling(&ca, "pending");
+        let held = act::enrol(&host, &enrolment, typed(PASSPHRASE)).unwrap();
+        let Enrolled::Held { request: 42, key } = held else {
+            panic!("{held:?}")
+        };
+        assert_eq!(&std::fs::read(&key).unwrap()[..8], b"PEIOSKEY");
+        std::fs::remove_file(key).unwrap();
+    }
+
+    #[test]
+    fn failures_are_said_as_the_window_says_things() {
+        let denied =
+            crate::failure::Failure::new(Kind::Denied, "access denied").context("approve 42");
+        assert_eq!(
+            act::failed("approve request #42", &denied),
+            "You don't have permission to approve request #42."
+        );
+        let other =
+            crate::failure::Failure::failed("request 42 is not pending").context("approve 42");
+        assert_eq!(
+            act::failed("approve request #42", &other),
+            "Request 42 is not pending."
+        );
+        let named = crate::failure::Failure::failed("lab.home may not be requested")
+            .context("enroll lab.home");
+        assert_eq!(
+            act::failed("request it", &named),
+            "lab.home may not be requested."
+        );
+    }
+}

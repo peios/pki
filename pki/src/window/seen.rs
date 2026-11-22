@@ -91,6 +91,11 @@ pub struct Seen {
     /// The port pki-httpd serves revocation lists on, unless it can't be
     /// read.
     pub http_port: Option<u16>,
+    /// The requests the person made in the window that were held.
+    pub held: Vec<super::held::Held>,
+    /// Those of them issued since, with the first name each is for: their
+    /// certificates are ready to save.
+    pub ready: Vec<(super::held::Held, String)>,
 }
 
 impl Seen {
@@ -124,6 +129,7 @@ pub fn look() -> Seen {
         Ok(snapshot) => may(snapshot),
         Err(_) => May::default(),
     };
+    let held = super::held::read();
     let mut waiting = BTreeMap::new();
     if let Ok(pkid) = &pkid {
         for authority in pkid.authorities.iter().filter(|a| a.certificate.is_some()) {
@@ -146,7 +152,27 @@ pub fn look() -> Seen {
         httpd_service: service::look(service::HTTPD),
         waiting,
         http_port: pki_management::provision::http_port().ok(),
+        ready: ready(&held),
+        held,
     }
+}
+
+/// The held requests that have been issued, each with its first name.
+fn ready(held: &[super::held::Held]) -> Vec<(super::held::Held, String)> {
+    let client = Client::new();
+    held.iter()
+        .rev()
+        .take(32)
+        .filter_map(|held| {
+            let request = client.request(&held.ca, held.request).ok()?;
+            (request.status == RequestStatus::Issued).then(|| {
+                (
+                    held.clone(),
+                    request.names.first().cloned().unwrap_or_default(),
+                )
+            })
+        })
+        .collect()
 }
 
 /// Why pkid didn't answer, as the window tells it.

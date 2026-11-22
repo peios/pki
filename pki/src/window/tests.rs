@@ -24,6 +24,8 @@ use pkid_core::{
 };
 use time::{Duration, OffsetDateTime};
 
+use super::doing::Asking;
+use super::held::Held;
 use super::seen::{Change, May, Person, Pkid, Seen, Trouble};
 use super::service::{Run, Service};
 use super::{Listing, Page, Window};
@@ -414,6 +416,8 @@ fn admin() -> Window {
         )]
         .into(),
         http_port: Some(80),
+        held: Vec::new(),
+        ready: Vec::new(),
     };
     let mut window = Window::new(seen, Some(ADMIN.into()));
     window.people = HashMap::from([
@@ -477,6 +481,46 @@ fn officer() -> Window {
     }
     window.seen.pkid.as_mut().unwrap().create = false;
     window.seen.may = may(false);
+    window
+}
+
+/// A page as opening it leaves its fields, then with `set` typed.
+fn filled(
+    window: Window,
+    name: &'static str,
+    set: &[(&str, &str)],
+) -> (&'static str, Window, Fields) {
+    let mut fields = Fields::default();
+    window.fill(&mut fields);
+    for (field, value) in set {
+        fields.set(field, value);
+    }
+    if set.iter().any(|(field, _)| *field == "new-kind") {
+        super::manage::fill_new(&mut fields);
+    }
+    (name, window, fields)
+}
+
+fn asking(mut window: Window, question: Asking) -> Window {
+    window.asking = Some(question);
+    window
+}
+
+/// Alice, with a request she made in the window held, then issued.
+fn ready(mut window: Window) -> Window {
+    let held = Held {
+        ca: "issuing".into(),
+        request: 9,
+        out: "/home/alice/camera.p12".into(),
+        key: "/home/alice/camera.p12.key".into(),
+    };
+    window.seen.held = vec![held.clone()];
+    window.seen.ready = vec![(held, "camera.lab.home".into())];
+    let mut issued = request(9, &["camera.lab.home"], ALICE, RequestStatus::Issued, 1);
+    issued.reasons.clear();
+    if let Some(Ok(requests)) = &mut window.listing.requests {
+        requests.insert(0, issued);
+    }
     window
 }
 
@@ -619,15 +663,15 @@ fn pages() -> Vec<(&'static str, Window, Fields)> {
             ),
             none(),
         ),
-        (
-            "authority-root",
+        filled(
             at_page(admin(), Page::Authority("root".into())),
-            none(),
+            "authority-root",
+            &[],
         ),
-        (
-            "authority-issuing",
+        filled(
             at_page(admin(), Page::Authority("issuing".into())),
-            none(),
+            "authority-issuing",
+            &[],
         ),
         (
             "authority-officer",
@@ -646,6 +690,88 @@ fn pages() -> Vec<(&'static str, Window, Fields)> {
         ),
         ("enrol", at_page(alice(), Page::Enrol), enrol_fields),
         ("enrol-own", at_page(alice(), Page::Enrol), own),
+        (
+            "request-deny",
+            asking(
+                at_page(
+                    admin(),
+                    Page::Request {
+                        ca: "issuing".into(),
+                        id: 7,
+                    },
+                ),
+                Asking::Deny {
+                    ca: "issuing".into(),
+                    id: 7,
+                },
+            ),
+            none(),
+        ),
+        (
+            "certificate-revoke",
+            asking(
+                at_page(
+                    admin(),
+                    Page::Certificate {
+                        ca: "issuing".into(),
+                        serial: serial(0),
+                    },
+                ),
+                Asking::Revoke {
+                    ca: "issuing".into(),
+                    serial: crate::show::hex(&serial(0)),
+                },
+            ),
+            none(),
+        ),
+        (
+            "authority-publish",
+            asking(
+                at_page(admin(), Page::Authority("root".into())),
+                Asking::Publish { ca: "root".into() },
+            ),
+            none(),
+        ),
+        ("overview-ready", ready(alice()), none()),
+        (
+            "request-ready",
+            asking(
+                at_page(
+                    ready(alice()),
+                    Page::Request {
+                        ca: "issuing".into(),
+                        id: 9,
+                    },
+                ),
+                Asking::Collect {
+                    ca: "issuing".into(),
+                    id: 9,
+                },
+            ),
+            none(),
+        ),
+        filled(at_page(admin(), Page::NewAuthority), "new-authority", &[]),
+        filled(
+            at_page(admin(), Page::NewAuthority),
+            "new-authority-under",
+            &[("new-kind", "under"), ("new-keep", "file")],
+        ),
+        filled(
+            at_page(admin(), Page::NewAuthority),
+            "new-authority-import",
+            &[("new-kind", "import")],
+        ),
+        filled(
+            at_page(officer(), Page::NewAuthority),
+            "new-authority-refused",
+            &[],
+        ),
+        filled(at_page(admin(), Page::Sign("root".into())), "sign", &[]),
+        filled(
+            at_page(admin(), Page::ExportKey("issuing".into())),
+            "export-key",
+            &[],
+        ),
         ("templates", at_page(admin(), Page::Templates), none()),
         ("templates-alice", at_page(alice(), Page::Templates), none()),
         (
@@ -753,9 +879,70 @@ fn trouble_is_said_where_it_matters() {
                 assert!(html.contains("no authorities you have access to"))
             }
             "name-broad" => assert!(html.contains("without approval")),
+            "request-ready" => {
+                assert!(html.contains(r#"name="passphrase""#));
+                assert!(html.contains("collect-confirm"));
+            }
+            "new-authority-refused" => assert!(html.contains("permission to add authorities")),
+            "new-authority-under" => {
+                assert!(html.contains("new-issuer") && html.contains("new-key-file"))
+            }
+            "authority-issuing" => assert!(html.contains(r#"fx-submit="issuing""#)),
+            "authority-officer" => assert!(!html.contains(r#"fx-submit="issuing""#)),
+            "overview-ready" => {
+                assert!(html.contains("Your certificate for camera.lab.home is ready"))
+            }
+            "certificate-revoke" => {
+                assert!(html.contains("revoke-confirm") && html.contains("Key Compromise"))
+            }
             _ => {}
         }
     }
+}
+
+/// `html` with the values `fields` holds put into its inputs, selects and
+/// switches, as the live page shows them; static HTML has no fields.
+fn with_fields(html: &str, fields: &Fields) -> String {
+    let mut out = String::new();
+    let mut rest = html;
+    while let Some(start) = rest.find('<') {
+        out.push_str(&rest[..start]);
+        rest = &rest[start..];
+        let end = rest.find('>').map_or(rest.len(), |at| at + 1);
+        let tag = &rest[..end];
+        let name = tag
+            .split_once(" name=\"")
+            .and_then(|(_, after)| after.split_once('"'))
+            .map(|(name, _)| name.to_owned());
+        match name {
+            Some(name) if tag.starts_with("<input") => {
+                let value = fields.get(&name);
+                let open = &tag[..tag.len() - 1];
+                if tag.contains("type=\"checkbox\"") {
+                    out.push_str(open);
+                    if value == "on" {
+                        out.push_str(" checked");
+                    }
+                    out.push('>');
+                } else {
+                    out.push_str(&format!("{open} value=\"{}\">", gxwi::escape(value)));
+                }
+                rest = &rest[end..];
+            }
+            Some(name) if tag.starts_with("<select") => {
+                let close = rest.find("</select>").map_or(rest.len(), |at| at + 9);
+                let chosen = format!("<option value=\"{}\"", gxwi::escape(fields.get(&name)));
+                out.push_str(&rest[..close].replacen(&chosen, &format!("{chosen} selected"), 1));
+                rest = &rest[close..];
+            }
+            _ => {
+                out.push_str(tag);
+                rest = &rest[end..];
+            }
+        }
+    }
+    out.push_str(rest);
+    out
 }
 
 /// With PKI_PREVIEW set, write each page with the theme for a browser.
@@ -771,7 +958,7 @@ fn previews() {
             "<!doctype html><html><head><meta charset=utf-8><style>{tokens}\n{}\n{}\nbody{{margin:0;background:var(--bg-base);color:var(--text-body);font-family:system-ui,sans-serif;height:100vh}}</style></head><body>{}</body></html>",
             gxwi::settings::STYLE,
             include_str!("window.css"),
-            render(&window, &fields)
+            with_fields(&render(&window, &fields), &fields)
         );
         std::fs::write(dir.join(format!("{name}.html")), html).unwrap();
     }

@@ -1,7 +1,7 @@
 //! A CA's page: what it is, what the person may do there, how it issues,
 //! its revocation list, its key and who may use it.
 
-use gxwi::settings::{self, Glyph, Kind, Tile, Tone};
+use gxwi::settings::{self, Glyph, Kind, More, Tile, Tone, Width};
 use pkid_core::AuthorityInfo;
 
 use super::{describe, words, Window};
@@ -222,40 +222,44 @@ pub fn page(window: &Window, authority: &AuthorityInfo) -> String {
         page.push_str(&settings::group("Certificate", &rows, ""));
     }
 
-    let templates: Vec<String> = authority.templates.iter().map(|t| t.name.clone()).collect();
-    let mut rows = settings::fact(
-        "Templates",
-        &if templates.is_empty() {
-            "None: takes no requests".to_string()
-        } else {
-            describe::and(&templates)
-        },
-        false,
-    );
-    let points = crl_points(window, authority);
-    rows.push_str(&settings::fact(
-        "Revocation List Addresses",
-        &if points.is_empty() {
-            "None".to_string()
-        } else {
-            points.join("\n")
-        },
-        !points.is_empty(),
-    ));
-    rows.push_str(&settings::fact(
-        "Revocation List Lifetime",
-        &words::count(i64::from(authority.crl_lifetime_days), "day"),
-        false,
-    ));
-    page.push_str(&settings::group(
-        "Issuing",
-        &rows,
-        &if manage {
-            String::new()
-        } else {
-            needs_manage(authority)
-        },
-    ));
+    if manage {
+        page.push_str(&super::manage::issuing_form(window, authority));
+    } else {
+        let templates: Vec<String> = authority.templates.iter().map(|t| t.name.clone()).collect();
+        let mut rows = settings::fact(
+            "Templates",
+            &if templates.is_empty() {
+                "None: takes no requests".to_string()
+            } else {
+                describe::and(&templates)
+            },
+            false,
+        );
+        let points = crl_points(window, authority);
+        rows.push_str(&settings::fact(
+            "Revocation List Addresses",
+            &if points.is_empty() {
+                "None".to_string()
+            } else {
+                points.join("\n")
+            },
+            !points.is_empty(),
+        ));
+        rows.push_str(&settings::fact(
+            "Revocation List Lifetime",
+            &words::count(i64::from(authority.crl_lifetime_days), "day"),
+            false,
+        ));
+        page.push_str(&settings::group(
+            "Issuing",
+            &rows,
+            &if manage {
+                String::new()
+            } else {
+                needs_manage(authority)
+            },
+        ));
+    }
 
     if authority.certificate.is_some() {
         let mut rows = match &authority.crl {
@@ -302,8 +306,33 @@ pub fn page(window: &Window, authority: &AuthorityInfo) -> String {
                 } else {
                     "The Certificate Service publishes a new list by itself, at half each list's lifetime and after every revocation."
                 },
-                &settings::button("Publish Now", "publish", &[("ca", &authority.id)], Kind::Plain, enabled),
+                &settings::button("Publish Now", "publish", &[("ca", &authority.id)], Kind::Plain, enabled && window.asking.is_none()),
             ));
+            let asked = super::doing::Asking::Publish {
+                ca: authority.id.clone(),
+            };
+            if window.asking.as_ref() == Some(&asked) {
+                rows.push_str(&settings::more(
+                    More::Form,
+                    &format!(
+                        "<p>Type the passphrase of {}'s key to sign the list.</p><div class=\"fields\"><label>Passphrase{}</label></div>{}",
+                        gxwi::escape(&authority.name),
+                        settings::text(
+                            "passphrase",
+                            "Passphrase",
+                            "password",
+                            Width::Normal,
+                            true,
+                            r#"autocomplete="off" fx-autofocus"#,
+                        ),
+                        settings::actions(&format!(
+                            "{}{}",
+                            settings::button("Cancel", "cancel", &[], Kind::Plain, true),
+                            settings::button("Publish", "publish", &[("ca", &authority.id)], Kind::Primary, enabled),
+                        )),
+                    ),
+                ));
+            }
         }
         page.push_str(&settings::group(
             "Revocation List",

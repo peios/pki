@@ -507,6 +507,10 @@ pub struct Enroll {
     /// Read the passphrase from a file
     #[arg(long, value_name = "file")]
     pub passphrase_file: Option<PathBuf>,
+    /// Replace the files written if they exist: the window's file dialog
+    /// has asked first. Not offered on the command line.
+    #[arg(skip)]
+    pub replace: bool,
 }
 
 /// Who signs a new CA's certificate.

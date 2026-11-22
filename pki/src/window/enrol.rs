@@ -250,7 +250,10 @@ pub fn page(window: &Window, fields: &Fields) -> String {
         ));
         rows.push_str(&settings::row(
             "Password",
-            "Protects the file. Programs ask for it when they import it.",
+            &format!(
+                "Protects the file, and programs ask for it when they import it. At least {} characters.",
+                pki_keys::MIN_PASSPHRASE_CHARS
+            ),
             &settings::text(
                 "enrol-password",
                 "Password",

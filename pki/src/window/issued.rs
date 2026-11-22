@@ -4,10 +4,12 @@
 //! pkid shows someone without Read at a CA only their own requests and
 //! certificates; the pages say so, rather than look complete.
 
-use gxwi::settings::{self, Glyph, Kind, Tile, Tone};
+use gxwi::settings::{self, Glyph, Kind, More, Tile, Tone, Width};
 use gxwi::Fields;
 use pkid_core::{AuthorityInfo, CertificateInfo, RequestInfo, RequestStatus};
 
+use super::doing::Asking;
+use super::held::Held;
 use super::{describe, waiting, words, Window};
 use crate::show::{OFFICER, READ};
 
@@ -393,7 +395,7 @@ pub fn request(window: &Window, ca_id: &str, id: i64) -> String {
         let officer = ca.granted & OFFICER != 0;
         if officer {
             let enabled = !window.busy && !mine;
-            let rows = settings::row(
+            let mut rows = settings::row(
                 "Decision",
                 if mine {
                     "You can't approve or deny your own request. Another officer has to."
@@ -402,10 +404,42 @@ pub fn request(window: &Window, ca_id: &str, id: i64) -> String {
                 },
                 &format!(
                     "{}{}",
-                    settings::button("Deny…", "deny", &values, Kind::Danger, enabled),
+                    settings::button(
+                        "Deny…",
+                        "deny",
+                        &values,
+                        Kind::Danger,
+                        enabled && window.asking.is_none()
+                    ),
                     settings::button("Approve", "approve", &values, Kind::Primary, enabled),
                 ),
             );
+            let asked = Asking::Deny {
+                ca: ca.id.clone(),
+                id: request.id,
+            };
+            if window.asking.as_ref() == Some(&asked) {
+                rows.push_str(&settings::more(
+                    More::Asking,
+                    &format!(
+                        "<p>Deny request #{}? It can't be approved afterwards.</p><div class=\"fields\"><label>Reason{}</label></div>{}",
+                        request.id,
+                        settings::text(
+                            "deny-reason",
+                            "Reason",
+                            "text",
+                            Width::Wide,
+                            true,
+                            r#"placeholder="Optional: why, for the requester and the record" autocomplete="off""#,
+                        ),
+                        settings::actions(&format!(
+                            "{}{}",
+                            settings::focused_button("Cancel", "cancel", Kind::Plain),
+                            settings::button("Deny", "deny-confirm", &[], Kind::Danger, !window.busy),
+                        )),
+                    ),
+                ));
+            }
             page.push_str(&settings::group("", &rows, ""));
         } else {
             page.push_str(&settings::group(
@@ -421,6 +455,14 @@ pub fn request(window: &Window, ca_id: &str, id: i64) -> String {
                 "",
             ));
         }
+    }
+    if let Some(held) = window
+        .seen
+        .held
+        .iter()
+        .find(|h| h.ca == ca.id && h.request == request.id)
+    {
+        page.push_str(&held_rows(window, request, held));
     }
     if request.status == RequestStatus::Issued {
         let certificate = window
@@ -446,6 +488,68 @@ pub fn request(window: &Window, ca_id: &str, id: i64) -> String {
         }
     }
     page
+}
+
+/// A request the person made in the window and is waiting for: what they
+/// can do about it.
+fn held_rows(window: &Window, request: &RequestInfo, held: &Held) -> String {
+    let id = request.id.to_string();
+    let values = [("ca", held.ca.as_str()), ("id", id.as_str())];
+    let key = held.key.display().to_string();
+    let out = held.out.display().to_string();
+    let rows = match request.status {
+        RequestStatus::Pending => settings::row(
+            "Your Key",
+            &format!("Kept in {key} until the request is decided. Come back here once it's issued to save it."),
+            "",
+        ),
+        RequestStatus::Denied => settings::row(
+            "Forget This Request",
+            &format!("It was denied, so the key kept for it in {key} can be deleted."),
+            &settings::button("Forget", "forget-held", &values, Kind::Plain, !window.busy),
+        ),
+        RequestStatus::Issued => {
+            let mut rows = settings::row(
+                "Save Your Certificate",
+                &format!("Saves it with the key kept for it to {out}."),
+                &settings::button(
+                    "Save…",
+                    "collect",
+                    &values,
+                    Kind::Primary,
+                    !window.busy && window.asking.is_none(),
+                ),
+            );
+            let asked = Asking::Collect {
+                ca: held.ca.clone(),
+                id: request.id,
+            };
+            if window.asking.as_ref() == Some(&asked) {
+                rows.push_str(&settings::more(
+                    More::Form,
+                    &format!(
+                        "<p>Type the password you chose for {}.</p><div class=\"fields\"><label>Password{}</label></div>{}",
+                        gxwi::escape(&out),
+                        settings::text(
+                            "passphrase",
+                            "Password",
+                            "password",
+                            Width::Normal,
+                            true,
+                            r#"autocomplete="off" fx-autofocus"#,
+                        ),
+                        settings::actions(&format!(
+                            "{}{}",
+                            settings::button("Cancel", "cancel", &[], Kind::Plain, true),
+                            settings::button("Save", "collect-confirm", &[], Kind::Primary, !window.busy),
+                        )),
+                    ),
+                ));
+            }
+            rows
+        }
+    };
+    settings::group("Your Certificate", &rows, "")
 }
 
 fn certificate_state(certificate: &CertificateInfo, now: i64) -> (&'static str, Tone, Tile) {
@@ -719,9 +823,41 @@ pub fn certificate(window: &Window, ca_id: &str, serial: &[u8]) -> String {
                 "revoke",
                 &[("ca", ca.id.as_str()), ("serial", serial_text.as_str())],
                 Kind::Danger,
-                !window.busy,
+                !window.busy && window.asking.is_none(),
             ),
         ));
+        let asked = Asking::Revoke {
+            ca: ca.id.clone(),
+            serial: serial_text.clone(),
+        };
+        if window.asking.as_ref() == Some(&asked) {
+            let reasons: Vec<(String, String)> = crate::cli::REASONS
+                .iter()
+                .map(|(name, code)| (name.to_string(), words::reason(*code).to_string()))
+                .collect();
+            let later = if crate::run::sealed(ca) {
+                format!(
+                    " {} keeps its key sealed, so publish a new revocation list afterwards.",
+                    ca.name
+                )
+            } else {
+                String::new()
+            };
+            rows.push_str(&settings::more(
+                More::Asking,
+                &format!(
+                    "<p>Revoke {}? This can't be undone.{}</p><div class=\"fields\"><label>Reason{}</label></div>{}",
+                    gxwi::escape(&name),
+                    gxwi::escape(&later),
+                    settings::select("revoke-reason", "Reason", &reasons, true),
+                    settings::actions(&format!(
+                        "{}{}",
+                        settings::focused_button("Cancel", "cancel", Kind::Plain),
+                        settings::button("Revoke", "revoke-confirm", &[], Kind::Danger, !window.busy),
+                    )),
+                ),
+            ));
+        }
     }
     page.push_str(&settings::group("", &rows, ""));
     page
