@@ -33,5 +33,5 @@ auth-core = { git = "https://github.com/peios/authd.git", rev = "327ce68648e1594
 # Starting and stopping pkid and pki-httpd, as the caller may.
 peinit2 = { git = "https://github.com/peios/peinit.git", rev = "8ff7155b87e1f8c03ce78baf64d8d7b5425fbe3a", default-features = false }
 gxwi = { git = "https://github.com/peios/gxwi.git", rev = "0cdbd97c86ca0e78138c6b320d88d5be8e2a6407", optional = true }
-gxwi-file-dialog = { git = "https://github.com/peios/gxwi-essentials.git", rev = "56e95100671a6b80ff98b62a00385c84bb88defb", default-features = false, optional = true }
-gxwi-sd-editor = { git = "https://github.com/peios/gxwi-essentials.git", rev = "56e95100671a6b80ff98b62a00385c84bb88defb", default-features = false, features = ["registry", "splice"], optional = true }
+gxwi-file-dialog = { git = "https://github.com/peios/gxwi-essentials.git", rev = "bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4", default-features = false, optional = true }
+gxwi-sd-editor = { git = "https://github.com/peios/gxwi-essentials.git", rev = "bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4", default-features = false, features = ["registry", "splice"], optional = true }
