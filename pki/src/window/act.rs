@@ -8,7 +8,7 @@ use std::collections::VecDeque;
 use std::io;
 use std::path::PathBuf;
 
-use pki_management::provision::Seeded;
+use pki_management::provision::{Boot, Seeded};
 use pki_management::Snapshot;
 use pki_policy::Values;
 use pkid_client::ClientError;
@@ -58,6 +58,14 @@ impl Host for Answering<'_> {
 
     fn setup(&self) -> io::Result<Seeded> {
         self.inner.setup()
+    }
+
+    fn start_at_boot(&self, service: &str) -> io::Result<Boot> {
+        self.inner.start_at_boot(service)
+    }
+
+    fn start(&self, service: &str) -> Result<(), String> {
+        self.inner.start(service)
     }
 
     /// The next answer. A prompt the window didn't expect has none, and

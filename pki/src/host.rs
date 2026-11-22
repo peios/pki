@@ -3,7 +3,8 @@
 
 use std::io;
 
-use pki_management::provision::{self, Seeded};
+use peinit::client::{Command, ControlClient, Failure};
+use pki_management::provision::{self, Boot, Seeded};
 use pki_management::{registry, write, Snapshot};
 use pki_policy::Values;
 use pkid_client::{Client, ClientError};
@@ -18,6 +19,12 @@ pub trait Host {
 
     /// Provisions this machine for pkid.
     fn setup(&self) -> io::Result<Seeded>;
+
+    /// Has `service` start at boot, unless it has Triggers already.
+    fn start_at_boot(&self, service: &str) -> io::Result<Boot>;
+
+    /// Has peinit start `service`, as the person. Says why it couldn't.
+    fn start(&self, service: &str) -> Result<(), String>;
 
     /// Asks for a passphrase without echoing it.
     fn prompt(&self, question: &str) -> io::Result<Zeroizing<String>>;
@@ -65,6 +72,22 @@ impl Host for Live {
     fn setup(&self) -> io::Result<Seeded> {
         provision::state_directories()?;
         provision::registry()
+    }
+
+    fn start_at_boot(&self, service: &str) -> io::Result<Boot> {
+        provision::start_at_boot(service)
+    }
+
+    fn start(&self, service: &str) -> Result<(), String> {
+        let mut client = ControlClient::connect_default().map_err(|error| error.to_string())?;
+        match client.command(Command::Start, service) {
+            Ok(_) => Ok(()),
+            Err(Failure::Refused { code, .. }) if code == "ACCESS_DENIED" => {
+                Err("you don't have permission to start it".into())
+            }
+            Err(Failure::Refused { message, .. }) => Err(message),
+            Err(Failure::Unreachable(why)) => Err(why),
+        }
     }
 
     fn prompt(&self, question: &str) -> io::Result<Zeroizing<String>> {

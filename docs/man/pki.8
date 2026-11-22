@@ -253,6 +253,15 @@ sets
 first;
 .B pki\-httpd
 uses it from its next start.
+Last, it has
+.B pkid
+and
+.B pki\-httpd
+start at boot, by giving each service a boot trigger, and starts them.
+pki's package defines both services to start at no time, so that nothing runs until a machine is set up.
+A service that has triggers already keeps them, and setup leaves it running or stopped as it is.
+When it can't start a service, it warns, and the service starts at the next boot, or with
+.BR "svctl start" .
 .B setup
 only adds what is missing.
 It never replaces a value an administrator has set, so it is safe to run again.

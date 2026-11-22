@@ -42,9 +42,9 @@ use pkid_core::{AuthorityInfo, CertificateInfo, RequestInfo, RequestStatus};
 use self::doing::Asking;
 use self::seen::{Person, Seen, Trouble};
 
-// The window's icon, named for its declaration, dev.peios.pkid.toml (PGSS
+// The window's icon, named for its declaration, dev.peios.pki.toml (PGSS
 // Icons §4.5). Only the window build carries it.
-gxwi::icon!(b"dev.peios.pkid");
+gxwi::icon!(b"dev.peios.pki");
 
 /// How often the window reads everything again. Nothing tells a client
 /// when pkid or its configuration changes.

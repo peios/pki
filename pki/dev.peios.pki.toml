@@ -1,7 +1,7 @@
 # What the Certificate Authority is to a desktop (PGSS Applications):
-# installed as /usr/share/apps/dev.peios.pkid.toml, named for the id, by the
+# installed as /usr/share/apps/dev.peios.pki.toml, named for the id, by the
 # package that installs pki. The id is the package's own name, so the icon
-# is dev.peios.pkid too. The launcher opens the window; the same program
+# is dev.peios.pki too. The launcher opens the window; the same program
 # without --window is the command line.
 title = "Certificate Authority"
 description = "Issue certificates for this network, and choose who may request them"

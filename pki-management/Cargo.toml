@@ -13,3 +13,6 @@ peios-crypto.workspace = true
 pki-core = { path = "../pki-core" }
 pki-policy = { path = "../pki-policy" }
 pkid-core = { path = "../pkid-core" }
+
+[dev-dependencies]
+serde_json = "1"

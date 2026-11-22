@@ -3,7 +3,7 @@
 use std::path::Path;
 
 use pki_keys::{KeyError, NewPassphrase};
-use pki_management::provision::Reservation;
+use pki_management::provision::{Boot, Reservation};
 use pki_management::security;
 use pkid_core::{AuthorityInfo, Issuer, KeySpec, Passphrase, Reply, Request};
 use serde_json::json;
@@ -77,6 +77,44 @@ fn setup(host: &dyn Host, http_port: Option<u16>) -> Result<Output, Failure> {
             "pki-httpd serves revocation lists on port {port} from its next start.\n"
         ));
     }
+    // pki's package defines pkid and pki-httpd to start at no time, so
+    // that nothing runs until a machine is set up. A service setup has
+    // just turned on is started now, since its boot trigger first fires
+    // at the next boot; one that had Triggers is left as it is.
+    let mut services = serde_json::Map::new();
+    for service in pki_management::provision::SERVICES {
+        let boot = host.start_at_boot(service).map_err(refused)?;
+        let mut started = false;
+        match boot {
+            Boot::Added => {
+                text.push_str(&format!("{service} starts at boot.\n"));
+                match host.start(service) {
+                    Ok(()) => {
+                        text.push_str(&format!("Started {service}.\n"));
+                        started = true;
+                    }
+                    Err(why) => host.warn(&format!(
+                        "couldn't start {service}: {why}; start it with svctl start {service}"
+                    )),
+                }
+            }
+            Boot::Present => {}
+            Boot::Undefined => host.warn(&format!(
+                "this machine has no {service} service, so setup couldn't have it start at boot; install pki's package"
+            )),
+        }
+        services.insert(
+            service.to_owned(),
+            json!({
+                "boot": match boot {
+                    Boot::Added => "added",
+                    Boot::Present => "present",
+                    Boot::Undefined => "undefined",
+                },
+                "started": started,
+            }),
+        );
+    }
     Ok(Output {
         json: json!({
             "http_port": http_port,
@@ -84,6 +122,7 @@ fn setup(host: &dyn Host, http_port: Option<u16>) -> Result<Output, Failure> {
             "name_roots_added": seeded.name_roots,
             "authorities_key_added": seeded.authorities_key,
             "http_key_added": seeded.http_key,
+            "services": services,
             "port_reservation": match seeded.port {
                 Reservation::Added(port) => json!({"added": port}),
                 Reservation::Present => json!("present"),

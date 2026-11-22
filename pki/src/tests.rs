@@ -5,7 +5,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
 
-use pki_management::provision::Seeded;
+use pki_management::provision::{Boot, Seeded};
 use pki_management::Snapshot;
 use pki_policy::{RegData, SecurityBlob, Values};
 use pkid_client::ClientError;
@@ -38,6 +38,13 @@ struct Fake {
     reply: RefCell<Option<Result<Reply, ClientError>>>,
     /// The answers to prompts, in order.
     answers: RefCell<Vec<&'static str>>,
+    /// What provisioning adds; without it, provisioning is refused.
+    seeded: Option<Seeded>,
+    /// Each service's boot trigger, as setup finds it, and why starting it
+    /// fails, if it does.
+    services: Vec<(&'static str, Boot, Option<&'static str>)>,
+    /// The services started, in order.
+    started: RefCell<Vec<String>>,
     prompts: RefCell<Vec<String>>,
     sent: RefCell<Vec<Request>>,
 }
@@ -83,7 +90,25 @@ impl Host for Fake {
     }
 
     fn setup(&self) -> io::Result<Seeded> {
-        Err(io::Error::from(io::ErrorKind::PermissionDenied))
+        self.seeded
+            .clone()
+            .ok_or_else(|| io::Error::from(io::ErrorKind::PermissionDenied))
+    }
+
+    fn start_at_boot(&self, service: &str) -> io::Result<Boot> {
+        Ok(self
+            .services
+            .iter()
+            .find(|(name, _, _)| *name == service)
+            .map_or(Boot::Undefined, |(_, boot, _)| *boot))
+    }
+
+    fn start(&self, service: &str) -> Result<(), String> {
+        self.started.borrow_mut().push(service.to_owned());
+        match self.services.iter().find(|(name, _, _)| *name == service) {
+            Some((_, _, Some(why))) => Err((*why).to_owned()),
+            _ => Ok(()),
+        }
     }
 
     fn prompt(&self, question: &str) -> io::Result<Zeroizing<String>> {
@@ -1689,6 +1714,83 @@ fn creators_are_shown_and_set_with_warnings() {
 
     let failure = running(&fake(), "ca creators --set O:SYG:SY").unwrap_err();
     assert_eq!(failure.kind, Kind::Usage);
+}
+
+#[test]
+fn setup_starts_the_services_it_turns_on() {
+    let host = Fake {
+        seeded: Some(Seeded::default()),
+        services: vec![
+            ("pkid", Boot::Added, None),
+            (
+                "pki-httpd",
+                Boot::Added,
+                Some("you don't have permission to start it"),
+            ),
+        ],
+        ..fake()
+    };
+    let output = running(&host, "setup").unwrap();
+    assert_eq!(*host.started.borrow(), ["pkid", "pki-httpd"]);
+    assert!(
+        output
+            .text
+            .contains("pkid starts at boot.\nStarted pkid.\n"),
+        "{}",
+        output.text
+    );
+    assert!(
+        output.text.contains("pki-httpd starts at boot.\n"),
+        "{}",
+        output.text
+    );
+    assert!(
+        !output.text.contains("Started pki-httpd"),
+        "{}",
+        output.text
+    );
+    assert_eq!(
+        *host.warnings.borrow(),
+        ["couldn't start pki-httpd: you don't have permission to start it; start it with svctl start pki-httpd"]
+    );
+    assert_eq!(
+        output.json["services"]["pkid"],
+        serde_json::json!({"boot": "added", "started": true})
+    );
+    assert_eq!(output.json["services"]["pki-httpd"]["started"], false);
+}
+
+#[test]
+fn setup_leaves_services_that_have_triggers_alone() {
+    let host = Fake {
+        seeded: Some(Seeded::default()),
+        services: vec![
+            ("pkid", Boot::Present, None),
+            ("pki-httpd", Boot::Present, None),
+        ],
+        ..fake()
+    };
+    let output = running(&host, "setup").unwrap();
+    assert!(host.started.borrow().is_empty());
+    assert!(!output.text.contains("at boot"), "{}", output.text);
+    assert!(host.warnings.borrow().is_empty());
+}
+
+#[test]
+fn setup_says_when_pki_isnt_installed_as_a_package() {
+    let host = Fake {
+        seeded: Some(Seeded::default()),
+        ..fake()
+    };
+    running(&host, "setup").unwrap();
+    assert!(host.started.borrow().is_empty());
+    assert_eq!(
+        *host.warnings.borrow(),
+        [
+            "this machine has no pkid service, so setup couldn't have it start at boot; install pki's package",
+            "this machine has no pki-httpd service, so setup couldn't have it start at boot; install pki's package",
+        ]
+    );
 }
 
 #[test]

@@ -10,7 +10,7 @@ publish.workspace = true
 # Authority window, `pki --window`.
 [features]
 default = []
-window = ["dep:auth-core", "dep:gxwi", "dep:gxwi-file-dialog", "dep:gxwi-sd-editor", "dep:peinit2"]
+window = ["dep:auth-core", "dep:gxwi", "dep:gxwi-file-dialog", "dep:gxwi-sd-editor"]
 
 [dependencies]
 clap = { version = "4.6", default-features = false, features = ["std", "derive", "help", "usage", "error-context", "wrap_help"] }
@@ -31,7 +31,7 @@ zeroize = "1.8"
 # Display names of requesters and officers, from authd.
 auth-core = { git = "https://github.com/peios/authd.git", rev = "327ce68648e1594331c88a457afb261f9000b4c3", features = ["client"], optional = true }
 # Starting and stopping pkid and pki-httpd, as the caller may.
-peinit2 = { git = "https://github.com/peios/peinit.git", rev = "8ff7155b87e1f8c03ce78baf64d8d7b5425fbe3a", default-features = false, optional = true }
+peinit2 = { git = "https://github.com/peios/peinit.git", rev = "8ff7155b87e1f8c03ce78baf64d8d7b5425fbe3a", default-features = false }
 gxwi = { git = "https://github.com/peios/gxwi.git", rev = "0cdbd97c86ca0e78138c6b320d88d5be8e2a6407", optional = true }
 gxwi-file-dialog = { git = "https://github.com/peios/gxwi-essentials.git", rev = "56e95100671a6b80ff98b62a00385c84bb88defb", default-features = false, optional = true }
 gxwi-sd-editor = { git = "https://github.com/peios/gxwi-essentials.git", rev = "56e95100671a6b80ff98b62a00385c84bb88defb", default-features = false, features = ["registry", "splice"], optional = true }

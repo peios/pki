@@ -69,6 +69,7 @@ fn setup_page(window: &Window) -> String {
         ("Names", "Who may request certificates for which names. At first, each account its own, and administrators any."),
         ("Storage", "Where the Certificate Service keeps its keys and records, readable by it alone."),
         ("Revocation Publishing", "A web address other devices check revocation lists at, reserved for it."),
+        ("Services", "The Certificate Service and Revocation Publishing, started now and at every boot."),
     ]
     .iter()
     .map(|(label, about)| settings::row(label, about, ""))

@@ -18,7 +18,8 @@ device certificates unattended.
 ## Before you start
 
 - Sign in as a member of Administrators.
-- Make sure the pkid service is installed and running.
+- Make sure the `pki` package is installed. It doesn't start pkid or
+  pki-httpd: they start once you set the machine up.
 - Have removable media mounted for the root's key, such as `/media/usb`.
 - Choose a passphrase of at least 15 characters for the root's key, and
   somewhere safe to keep it. Without the passphrase, the root can never sign
@@ -34,8 +35,9 @@ pki setup
 
 It creates pkid's state directories under `/var/state/pki` and adds the
 default configuration under `Machine\Software\Pki`: the Server and Device
-templates and the roots of the name trees. It only adds what is missing, so
-running it again changes nothing you have set.
+templates and the roots of the name trees. Then it has pkid, and pki-httpd,
+which publishes revocation lists, start at boot, and starts them. It only
+adds what is missing, so running it again changes nothing you have set.
 
 In the Certificate Authority window, the overview offers **Set Up** to an
 administrator until the machine is prepared.

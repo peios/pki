@@ -266,6 +266,60 @@ fn grants(descriptor: &[u8], sid: &str) -> bool {
     })
 }
 
+/// The services setup has start at boot, pkid first: pki's package defines
+/// them with no Triggers, so that nothing runs until a machine is set up.
+pub const SERVICES: [&str; 2] = ["pkid", "pki-httpd"];
+
+/// What became of a service's boot trigger.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Boot {
+    /// Setup gave the service `Triggers=boot`.
+    Added,
+    /// The service had Triggers already, which setup leaves as they are.
+    Present,
+    /// peinit has no definition of the service: pki isn't installed as a
+    /// package.
+    Undefined,
+}
+
+/// Has `service` start at boot, unless its definition has Triggers of its
+/// own. peinit takes up Triggers on a service that isn't running as soon
+/// as they are written, but a boot trigger first fires at the next boot.
+pub fn start_at_boot(service: &str) -> io::Result<Boot> {
+    let path = format!("Machine\\System\\Services\\{service}");
+    let key = match Key::open(
+        None,
+        &path,
+        KeyAccess::QUERY_VALUE | KeyAccess::SET_VALUE,
+        OpenFlags::empty(),
+    ) {
+        Ok(key) => key,
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            return if failure.kind() == io::ErrorKind::NotFound {
+                Ok(Boot::Undefined)
+            } else {
+                Err(at(&path)(failure))
+            };
+        }
+    };
+    match key.query_value(b"Triggers", None) {
+        Ok(_) => return Ok(Boot::Present),
+        Err(failure) => {
+            let failure: io::Error = failure.into();
+            if failure.kind() != io::ErrorKind::NotFound {
+                return Err(at(&path)(failure));
+            }
+        }
+    }
+    let data = peios::registry::Data::MultiSz(vec!["boot".into()]);
+    key.set_value(b"Triggers", data.ty(), &data.encode())
+        .call()
+        .map_err(error)
+        .map_err(at(&path))?;
+    Ok(Boot::Added)
+}
+
 /// The port reservation table.
 pub const PORT_RESERVATIONS: &str = "Machine\\System\\Network\\TcpIp\\PortReservations";
 
