@@ -77,6 +77,25 @@ pki enroll "Home Issuing" --request 42 --key alice.p12.key --out alice.p12
 
 Delete `alice.p12.key` once the device has imported the file.
 
+## Request a certificate with the Certificate Authority window
+
+1. Open **Certificate Authority** from the launcher, and choose
+   **Request a Certificate** in the sidebar.
+2. Choose the **Authority** and the **Template**. Only those you may
+   request from are offered.
+3. Type the names the certificate is for, separated by commas.
+4. Leave **Key** set to **Make a Key Here** to have the window make the key
+   and save it with its certificates as a PKCS #12 file. Choose **Save To**
+   and a **Password** of at least 15 characters. To certify a request other
+   software made, set **Key** to **Use My Own Request** and choose the
+   request file instead.
+5. Choose **Request Certificate**.
+
+If the request is held for approval, the window keeps the key sealed beside
+the file and remembers the request. Once an officer approves it, the
+overview says the certificate is ready: open the request, choose **Save…**,
+and type the file's password.
+
 ## Check the result
 
 List the CA's certificates:

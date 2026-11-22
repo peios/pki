@@ -55,6 +55,15 @@ checked by pki-policy's rules first. `pki enroll` makes a key on the
 requester's machine and writes it, with its certificates, as a PKCS #12
 file: pkid sees only the request.
 
+`pki --window` is the Certificate Authority window, for the GXWI desktop,
+built with the `window` feature. It makes its changes by running `pki`'s own
+commands, answering their prompts from what was typed into it, and asks pkid,
+the Registry and peinit what the person may do before offering it.
+`pki/dev.peios.pkid.toml` is its launcher declaration (PGSS Applications)
+and `pki/pki.svg` its icon, installed as `/usr/share/apps/dev.peios.pkid.toml`
+and `/usr/share/icons/base/dev.peios.pkid.svg` by the package that installs
+`pki`.
+
 ## Build and test
 
 ```sh

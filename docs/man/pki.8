@@ -2,6 +2,8 @@
 .SH NAME
 pki \- manage the Peios certificate authority
 .SH SYNOPSIS
+.B pki \-\-window
+.br
 .B pki setup
 .br
 .B pki ca list
@@ -173,6 +175,13 @@ to create, sign and change CAs, and
 decides whether you can, by your own access token: what
 .B pki
 can do is exactly what you can.
+.PP
+.B pki \-\-window
+opens the Certificate Authority window on the GXWI desktop, which the
+launcher also opens.
+It makes the same changes as the commands below, by running them, and offers
+only what your permissions allow: what you can't change it shows read-only,
+with the reason.
 .PP
 A CA's key stays with
 .BR pkid .

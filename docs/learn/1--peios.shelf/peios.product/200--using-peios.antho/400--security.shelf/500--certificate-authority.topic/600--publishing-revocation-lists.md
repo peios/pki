@@ -84,6 +84,11 @@ To change how long a CA's lists last:
 pki ca set "Home Root" --crl-lifetime 365
 ```
 
+In the Certificate Authority window, a CA's page shows its latest list and
+when it expires, and **Publish Now** signs a new one, asking for the key's
+passphrase if it is sealed. The overview lists each list that is due or has
+expired.
+
 ## Check the result
 
 List the CAs and when their lists expire:

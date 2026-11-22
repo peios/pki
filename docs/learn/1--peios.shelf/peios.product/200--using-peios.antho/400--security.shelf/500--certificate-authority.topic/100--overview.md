@@ -17,9 +17,14 @@ in to Wi-Fi with. If you have run an enterprise certificate authority, the
 pieces will be familiar: CAs, templates that describe each kind of
 certificate, and requests that are issued at once or held for an officer.
 
-You manage pkid with the `pki` command. pkid decides every request by the
-access token of whoever sent it, so `pki` can do exactly what you can, and
-nothing more.
+You manage pkid with the `pki` command, or with the Certificate Authority
+window: open **Certificate Authority** from the launcher, or run
+`pki --window`. pkid decides every request by the access token of whoever
+sent it, so `pki` and the window can do exactly what you can, and nothing
+more. The window asks pkid and the Registry what you may change, offers
+only that, and shows the rest read-only with the reason. Someone who may
+only request certificates sees the authorities they can request from and
+their own requests and certificates.
 
 ## How a certificate is issued
 
