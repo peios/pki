@@ -141,6 +141,29 @@ pub fn broad_ca_grants(security: &[u8]) -> peios::Result<Vec<String>> {
     Ok(warnings)
 }
 
+/// The entries of `Settings ManageSecurity` that let a broad group create
+/// or import CAs (R1): a right for a few trusted people.
+pub fn broad_creators(security: &[u8]) -> peios::Result<Vec<String>> {
+    const GENERIC_ALL: u32 = 0x1000_0000;
+    const MANAGE: u32 = 0x8;
+    let view = SdView::parse(security)?;
+    let Some(dacl) = view.dacl() else {
+        return Ok(Vec::new());
+    };
+    let mut warnings = Vec::new();
+    for ace in dacl.iter() {
+        if ace.ace_type() != AceType::AccessAllowed || ace.mask() & (MANAGE | GENERIC_ALL) == 0 {
+            continue;
+        }
+        if let Some(group) = ace.sid().and_then(|sid| broad(&sid.to_string())) {
+            warnings.push(format!(
+                "{group} may now create CAs, and so issue any certificate"
+            ));
+        }
+    }
+    Ok(warnings)
+}
+
 /// What a tree root's new descriptor takes away that the shipped one
 /// grants: Administrators' right to request any name in the tree, and
 /// owners' right, through PRINCIPAL SELF, to request their own. A root

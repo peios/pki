@@ -125,6 +125,11 @@ Each CA's descriptor grants four rights:
 By default, Authenticated Users can request, and Administrators and SYSTEM
 hold every right. `pkid(8)` describes each right and descriptor.
 
+Who can create and import CAs is a descriptor of its own, which grants
+Manage to Administrators and SYSTEM by default. `pki ca creators` shows and
+sets it, as does **Who Can Add Authorities** on the Certificate Authority
+window's overview.
+
 ## Revocation
 
 A certificate can be revoked before it expires, such as when its key is

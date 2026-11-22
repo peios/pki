@@ -31,6 +31,16 @@ pub enum Run {
 }
 
 impl Service {
+    pub fn running(&self) -> bool {
+        matches!(
+            self,
+            Service::Known {
+                state: Run::Running,
+                ..
+            }
+        )
+    }
+
     /// Whether peinit would accept `command` from the person. Where peinit
     /// wouldn't say, the command is offered, and peinit decides.
     pub fn allows(&self, command: Command) -> bool {

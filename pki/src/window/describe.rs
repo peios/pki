@@ -149,6 +149,20 @@ pub fn enrollers(security: &[u8], people: &HashMap<String, Person>) -> String {
     }
 }
 
+/// Who may create and import authorities, in a line.
+pub fn creators(security: &[u8], people: &HashMap<String, Person>) -> String {
+    let who: Vec<String> = grants(security)
+        .into_iter()
+        .filter(|grant| grant.mask & (crate::show::MANAGE | GENERIC_ALL) != 0)
+        .map(|grant| who(&grant.sid, people))
+        .collect();
+    if who.is_empty() {
+        "Nobody".to_string()
+    } else {
+        and(&who)
+    }
+}
+
 /// Who may do what at a CA, in a line: "Authenticated Users request ·
 /// Administrators and SYSTEM manage".
 pub fn ca_users(security: &[u8], people: &HashMap<String, Person>) -> String {
@@ -235,6 +249,9 @@ pub fn sids(seen: &Seen) -> Vec<String> {
         from(&authority.security);
     }
     if let Ok(config) = &seen.config {
+        if let Ok(Some(security)) = config.settings.binary("ManageSecurity") {
+            from(security);
+        }
         for (_, values) in &config.templates {
             if let Ok(Some(security)) = values.binary("EnrollSecurity") {
                 from(security);

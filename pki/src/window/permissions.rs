@@ -265,3 +265,59 @@ impl Window {
         }
     }
 }
+
+impl Window {
+    /// Opens the editor on who may create and import authorities.
+    pub(super) fn edit_creators_permissions(&mut self) {
+        let may = self.seen.may.settings;
+        let security = self.seen.creators();
+        let request = Request {
+            object: Object {
+                name: "Adding authorities".into(),
+                kind: "Certificate Service".into(),
+                ..Default::default()
+            },
+            sd: security.clone(),
+            read: None,
+            rights: vec![right("Create and Import Authorities", MANAGE)],
+            generic: generic(),
+            can: Can {
+                dacl: may,
+                why: (!may).then(|| {
+                    "You don't have permission to change who may add authorities.".to_string()
+                }),
+                ..Can::default()
+            },
+        };
+        let surface = self.surface.clone();
+        let opened = gxwi_sd_editor::open(
+            &request,
+            move |edited, parts| {
+                if !parts.contains(&Part::Dacl) {
+                    return Ok(());
+                }
+                // Onto what the Registry holds now.
+                let now = pki_management::registry::read()
+                    .ok()
+                    .and_then(|config| {
+                        config
+                            .settings
+                            .binary("ManageSecurity")
+                            .ok()
+                            .flatten()
+                            .map(<[u8]>::to_vec)
+                    })
+                    .unwrap_or_else(|| security.clone());
+                let bytes = splice(&now, edited, &[Part::Dacl])?;
+                let text = sddl::format(&bytes).map_err(|error| error.to_string())?;
+                let said = act::set_creators(&Live::new(), &text)?;
+                if let Some(surface) = surface.upgrade() {
+                    surface.update(|w, _| w.said = Some(Ok(said)));
+                }
+                Ok(())
+            },
+            || {},
+        );
+        self.opened(opened);
+    }
+}

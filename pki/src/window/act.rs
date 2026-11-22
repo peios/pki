@@ -19,7 +19,7 @@ use zeroize::Zeroizing;
 use super::service::sentence;
 use crate::cli::{
     Ca, Cert, Command, Create, Enroll, Import, Issuer, Issuing, Keeping, NameCommand,
-    RequestCommand, Set, TemplateCommand, TemplateFields,
+    RequestCommand, Set, SetupArgs, TemplateCommand, TemplateFields,
 };
 use crate::failure::{Failure, Kind};
 use crate::host::Host;
@@ -106,7 +106,7 @@ pub struct Ran {
 
 /// The commands' own words for what they were doing, which come first in
 /// a failure's message.
-const CONTEXTS: [&str; 22] = [
+const CONTEXTS: [&str; 23] = [
     "approve ",
     "deny ",
     "revoke ",
@@ -129,6 +129,7 @@ const CONTEXTS: [&str; 22] = [
     "set-owner ",
     "domains",
     "reading the configuration",
+    "creators",
 ];
 
 /// A command's failure, said as the window says things. `doing` is what
@@ -257,7 +258,7 @@ pub fn publish(
 pub fn setup(host: &dyn Host) -> Result<String, String> {
     let ran = run(
         host,
-        Command::Setup,
+        Command::Setup(SetupArgs::default()),
         Vec::new(),
         "set up the certificate authority",
     )?;
@@ -846,4 +847,34 @@ pub fn set_domains(host: &dyn Host, domains: Vec<String>) -> Result<String, Stri
         "change the principal domains",
     )?;
     Ok("Principal domains saved.".into())
+}
+
+/// Replaces who may create and import authorities.
+pub fn set_creators(host: &dyn Host, sddl: &str) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Ca(Ca::Creators {
+            set: Some(sddl.to_owned()),
+        }),
+        Vec::new(),
+        "change who may add authorities",
+    )?;
+    Ok(with_warnings("Permissions changed.", ran.warnings))
+}
+
+/// Has pki-httpd serve on `port`, reserving it, as `pki setup
+/// --http-port` does.
+pub fn set_http_port(host: &dyn Host, port: u16) -> Result<String, String> {
+    let ran = run(
+        host,
+        Command::Setup(SetupArgs {
+            http_port: Some(port),
+        }),
+        Vec::new(),
+        "change the revocation list port",
+    )?;
+    Ok(with_warnings(
+        &format!("Revocation lists are served on port {port}."),
+        ran.warnings,
+    ))
 }

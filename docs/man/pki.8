@@ -5,6 +5,8 @@ pki \- manage the Peios certificate authority
 .B pki \-\-window
 .br
 .B pki setup
+.RB [ \-\-http\-port
+.IR port ]
 .br
 .B pki ca list
 .br
@@ -44,6 +46,10 @@ pki \- manage the Peios certificate authority
 .br
 .B pki ca set\-security
 .I ca sddl
+.br
+.B pki ca creators
+.RB [ \-\-set
+.IR sddl ]
 .br
 .B pki ca publish\-crl
 .I ca
@@ -234,12 +240,19 @@ settings.
 It also reserves
 .BR pki\-httpd 's
 TCP port for it, 80 unless
+.B \-\-http\-port
+or
 .B Machine\eSoftware\ePki\eHttp Port
 says otherwise, unless another service has reserved exactly that port: then it warns, and
 .B pki\-httpd
-can't serve CRLs until you choose another port and run
-.B setup
-again.
+can't serve CRLs until you choose another port with
+.BR "setup \-\-http\-port" .
+.B \-\-http\-port
+sets
+.B Http Port
+first;
+.B pki\-httpd
+uses it from its next start.
 .B setup
 only adds what is missing.
 It never replaces a value an administrator has set, so it is safe to run again.
@@ -320,6 +333,16 @@ Change which templates
 .I ca
 issues from, the CRL distribution points its certificates name, or how long its CRLs are valid.
 Each list given replaces the current one; a list not given stays as it is.
+.TP
+.B ca creators
+Show who can create and import CAs on this machine, or with
+.B \-\-set
+replace it, as an SDDL security descriptor granting Manage CA (0x8).
+The default lets Administrators and SYSTEM.
+Changing it needs write access to
+.BR Machine\eSoftware\ePki\eSettings .
+.B pki
+warns when the descriptor lets a broad group create CAs: whoever can create one can issue any certificate from it.
 .TP
 .BI "ca set\-security " "ca sddl"
 Replace who may do what at

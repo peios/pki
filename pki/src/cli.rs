@@ -40,7 +40,7 @@ pub struct Cli {
 #[derive(Debug, Subcommand)]
 pub enum Command {
     /// Prepare this machine for pkid
-    Setup,
+    Setup(SetupArgs),
     /// Create and manage CAs
     #[command(subcommand)]
     Ca(Ca),
@@ -134,6 +134,13 @@ pub enum Ca {
     },
     /// Change which templates a CA issues and where its CRL is published
     Set(Set),
+    /// Show or set who can create and import CAs
+    #[command(override_usage = "pki ca creators [options]")]
+    Creators {
+        /// Let this descriptor, as SDDL, say who can (Manage CA, 0x8)
+        #[arg(long = "set", value_name = "sddl")]
+        set: Option<String>,
+    },
     /// Set who may do what at a CA
     SetSecurity {
         /// The CA, by name or ID
@@ -511,6 +518,14 @@ pub struct Enroll {
     /// has asked first. Not offered on the command line.
     #[arg(skip)]
     pub replace: bool,
+}
+
+/// What `pki setup` is told.
+#[derive(Debug, Default, Args)]
+pub struct SetupArgs {
+    /// Serve revocation lists over HTTP on this port (default: 80)
+    #[arg(long, value_name = "port", value_parser = clap::value_parser!(u16).range(1..))]
+    pub http_port: Option<u16>,
 }
 
 /// Who signs a new CA's certificate.
