@@ -592,7 +592,7 @@ source = "git+https://github.com/peios/gxwi.git?rev=0cdbd97c86ca0e78138c6b320d88
 [[package]]
 name = "gxwi-file-dialog"
 version = "0.1.0"
-source = "git+https://github.com/peios/gxwi-essentials.git?rev=56e95100671a6b80ff98b62a00385c84bb88defb#56e95100671a6b80ff98b62a00385c84bb88defb"
+source = "git+https://github.com/peios/gxwi-essentials.git?rev=bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4#bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4"
 dependencies = [
  "gxwi-fs",
  "serde",
@@ -602,7 +602,7 @@ dependencies = [
 [[package]]
 name = "gxwi-fs"
 version = "0.1.0"
-source = "git+https://github.com/peios/gxwi-essentials.git?rev=56e95100671a6b80ff98b62a00385c84bb88defb#56e95100671a6b80ff98b62a00385c84bb88defb"
+source = "git+https://github.com/peios/gxwi-essentials.git?rev=bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4#bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4"
 dependencies = [
  "libc",
 ]
@@ -610,7 +610,7 @@ dependencies = [
 [[package]]
 name = "gxwi-sd-editor"
 version = "0.1.0"
-source = "git+https://github.com/peios/gxwi-essentials.git?rev=56e95100671a6b80ff98b62a00385c84bb88defb#56e95100671a6b80ff98b62a00385c84bb88defb"
+source = "git+https://github.com/peios/gxwi-essentials.git?rev=bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4#bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4"
 dependencies = [
  "base64 0.22.1",
  "peios",
