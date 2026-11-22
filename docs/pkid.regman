@@ -326,7 +326,11 @@ Who may do what at this CA. Read (0x1) sees every request and certificate;
 requesters always see their own. Request (0x2) submits requests. Issue and
 Manage Certificates (0x4) approves and denies held requests and revokes
 certificates; nobody approves their own request. Manage CA (0x8) changes
-the CA and its key.
+the CA, its key and this descriptor.
+
+Change it with `pki ca set-security` or the Certificate Authority window,
+which need Manage CA here; pkid writes it. A descriptor without an access
+list is refused, since it would grant everyone every right.
 
 Submitting needs Request here, enrollment on the template and a request
 right on every name.

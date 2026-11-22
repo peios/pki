@@ -19,6 +19,24 @@ Administrators hold by default.
 
 - Sign in as an officer of the CA.
 
+`pki ca show "Home Issuing"` lists your rights at the CA under Your access.
+
+## Make someone an officer
+
+Officers are named in the CA's descriptor. Someone with Manage CA at the CA
+can change it. To let the group Lab Officers approve and revoke, while
+everyone signed in can still request and Administrators keep every right:
+
+```sh
+pki ca set-security "Home Issuing" "D:(A;;0x2;;;AU)(A;;0x5;;;S-1-5-21-1-2-3-1105)(A;;0xf;;;BA)(A;;0xf;;;SY)"
+```
+
+The descriptor replaces the one the CA had, so include every grant it
+should keep. Grant `0x4` (Issue and Manage Certificates) and `0x8` (Manage
+CA) only to people you trust to issue any certificate. `pki` warns you if
+the descriptor lets a broad group approve or manage, or leaves you without
+Manage CA. `pki(8)` lists the rights.
+
 ## Approve or deny held requests
 
 1. List the requests waiting for an officer:

@@ -17,8 +17,8 @@ use std::time::Duration;
 use peios::security::Sid;
 use peios::token::Token;
 use pkid_core::{
-    read_frame, write_frame, AuthorityInfo, CertificateInfo, CertificateQuery, FrameError,
-    Passphrase, Reply, Request, RequestInfo, RequestQuery, SubmissionInfo, WireError,
+    read_frame, write_frame, AccessInfo, AuthorityInfo, CertificateInfo, CertificateQuery,
+    FrameError, Passphrase, Reply, Request, RequestInfo, RequestQuery, SubmissionInfo, WireError,
     MAX_REPLY_BYTES, SERVICE_SID, SOCKET_PATH,
 };
 use zeroize::Zeroizing;
@@ -89,6 +89,14 @@ impl Client {
     pub fn authorities(&self) -> Result<Vec<AuthorityInfo>, ClientError> {
         match self.call(&Request::Authorities)? {
             Reply::Authorities(authorities) => Ok(authorities),
+            other => Err(unexpected(&other)),
+        }
+    }
+
+    /// What the caller may do beyond any one CA.
+    pub fn access(&self) -> Result<AccessInfo, ClientError> {
+        match self.call(&Request::Access)? {
+            Reply::Access(access) => Ok(access),
             other => Err(unexpected(&other)),
         }
     }

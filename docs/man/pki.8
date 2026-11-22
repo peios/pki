@@ -40,6 +40,9 @@ pki \- manage the Peios certificate authority
 .I ca
 .RI [ options ]
 .br
+.B pki ca set\-security
+.I ca sddl
+.br
 .B pki ca publish\-crl
 .I ca
 .RB [ \-\-passphrase\-file
@@ -308,6 +311,19 @@ Change which templates
 .I ca
 issues from, the CRL distribution points its certificates name, or how long its CRLs are valid.
 Each list given replaces the current one; a list not given stays as it is.
+.TP
+.BI "ca set\-security " "ca sddl"
+Replace who may do what at
+.IR ca ,
+as an SDDL security descriptor.
+Its rights are Read (0x1), which sees every request and certificate; Request (0x2); Issue and Manage Certificates (0x4), which approves, denies and revokes; and Manage CA (0x8).
+A descriptor naming no owner or group gets SYSTEM as both.
+It needs Manage CA at
+.IR ca .
+.B pki
+warns when the descriptor lets a broad group, such as Everyone or Authenticated Users, approve or manage, and when you would no longer manage the CA yourself.
+.B pki ca show
+says what you may do at a CA.
 .TP
 .BI "ca publish\-crl " ca
 Sign and publish a new CRL for

@@ -6,8 +6,8 @@ use auth_core::client::ident::Ident;
 use auth_core::ident::{Fields, Key as IdentKey, Kind as IdentKind, Value};
 use peios::access::{AccessCheck, SubjectAccessDecision, SubjectGroup, SuppliedSubject};
 use peios::msgpack::{Reader, Writer};
-use peios::security::SidRef;
 use peios::security::{AccessMask, GenericMapping, SecurityDescriptor};
+use peios::security::{SdView, SidRef};
 use peios::token::Token;
 use pki_core::{DisplayName, Sid};
 use pki_pipeline::{Directory, PipelineError, Principal, CA_ALL};
@@ -43,6 +43,18 @@ fn check_failed(error: peios::Error) -> PolicyError {
 /// entries, by ordinary inheritance.
 fn inherit(parent: &SecurityBlob) -> Result<SecurityBlob, PolicyError> {
     pki_management::security::inherit(parent).map_err(check_failed)
+}
+
+fn validate(security: &SecurityBlob) -> Result<(), PolicyError> {
+    descriptor(security)?;
+    let view = SdView::parse(security.as_bytes()).map_err(check_failed)?;
+    if view.dacl().is_none() {
+        return Err(PolicyError::InvalidConfiguration(
+            "the security descriptor has no access list, so it would grant everyone every right"
+                .into(),
+        ));
+    }
+    Ok(())
 }
 
 /// A connected caller, checked by the token the kernel captured when it
@@ -84,6 +96,10 @@ impl AccessChecker for Caller {
 
     fn inherit(&self, parent: &SecurityBlob) -> Result<SecurityBlob, PolicyError> {
         inherit(parent)
+    }
+
+    fn validate(&self, security: &SecurityBlob) -> Result<(), PolicyError> {
+        validate(security)
     }
 }
 
@@ -203,6 +219,10 @@ impl AccessChecker for Recorded {
 
     fn inherit(&self, parent: &SecurityBlob) -> Result<SecurityBlob, PolicyError> {
         inherit(parent)
+    }
+
+    fn validate(&self, security: &SecurityBlob) -> Result<(), PolicyError> {
+        validate(security)
     }
 }
 

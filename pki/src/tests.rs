@@ -198,9 +198,12 @@ fn authority(id: &str, name: &str, key: &str) -> AuthorityInfo {
         certificate: Some(vec![0x30, 0x00]),
         request: None,
         key: key.into(),
+        granted: 0xf,
+        security: Vec::new(),
         templates: vec![TemplateInfo {
             id: "t-server".into(),
             name: "Server".into(),
+            enroll: true,
         }],
         key_available: !key.starts_with("file:"),
         crl_lifetime_days: if key.starts_with("file:") { 180 } else { 7 },
@@ -1466,6 +1469,42 @@ fn crl_lifetimes_are_set_with_ca_set() {
     };
     assert_eq!(crl_lifetime_days, Some(14));
     assert_eq!(templates, None);
+}
+
+#[test]
+fn ca_permissions_are_set_and_broad_grants_warned_of() {
+    let mut changed = authority("x", "Issuing", "service:x");
+    changed.granted = 0x3;
+    let host = fake().replying(Reply::Authority(changed));
+    let output = running(
+        &host,
+        "ca set-security Issuing D:(A;;0x2;;;AU)(A;;0xc;;;WD)",
+    )
+    .unwrap();
+    let Request::SetAuthoritySecurity { security, .. } = host.sent() else {
+        panic!()
+    };
+    // pki writes SYSTEM as the owner and group where the SDDL names none.
+    let text = peios::security::sddl::format(&security).unwrap();
+    assert!(text.starts_with("O:SYG:SY"), "{text}");
+    let warnings = host.warnings.borrow();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("Everyone may now manage")),
+        "{warnings:?}"
+    );
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w == "you can no longer manage this CA"),
+        "{warnings:?}"
+    );
+    assert!(
+        output.text.contains("Your access:  read, request"),
+        "{}",
+        output.text
+    );
 }
 
 #[test]

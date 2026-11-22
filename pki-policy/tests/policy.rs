@@ -85,6 +85,14 @@ impl AccessChecker for Requester {
             .collect();
         Ok(SecurityBlob::new(kept.join("\n").into_bytes()))
     }
+
+    fn validate(&self, security: &SecurityBlob) -> Result<(), PolicyError> {
+        // The model's stand-in for a descriptor without an access list.
+        if security.as_bytes().is_empty() {
+            return Err(PolicyError::InvalidConfiguration("no access list".into()));
+        }
+        Ok(())
+    }
 }
 
 fn node(security: Option<SecurityBlob>, owner: Option<&str>) -> NameNode {

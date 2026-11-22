@@ -137,6 +137,45 @@ pub fn crl_until(authority: &AuthorityInfo) -> String {
     }
 }
 
+/// The rights a CA's descriptor grants (pki-pipeline's `CA_*`).
+pub const READ: u32 = 0x1;
+pub const REQUEST: u32 = 0x2;
+pub const OFFICER: u32 = 0x4;
+pub const MANAGE: u32 = 0x8;
+
+/// The rights the caller holds at a CA, by their names in JSON.
+fn access(granted: u32) -> Vec<&'static str> {
+    [
+        (READ, "read"),
+        (REQUEST, "request"),
+        (OFFICER, "officer"),
+        (MANAGE, "manage"),
+    ]
+    .into_iter()
+    .filter(|(right, _)| granted & right != 0)
+    .map(|(_, name)| name)
+    .collect()
+}
+
+/// The rights the caller holds at a CA, as a reader says them.
+fn access_text(granted: u32) -> String {
+    let words: Vec<&str> = [
+        (READ, "read"),
+        (REQUEST, "request"),
+        (OFFICER, "issue and manage certificates"),
+        (MANAGE, "manage CA"),
+    ]
+    .into_iter()
+    .filter(|(right, _)| granted & right != 0)
+    .map(|(_, name)| name)
+    .collect();
+    if words.is_empty() {
+        "none".to_string()
+    } else {
+        words.join(", ")
+    }
+}
+
 pub fn authority_json(authority: &AuthorityInfo) -> Value {
     let now = now();
     json!({
@@ -145,9 +184,11 @@ pub fn authority_json(authority: &AuthorityInfo) -> Value {
         "state": state(authority),
         "key": authority.key,
         "key_available": authority.key_available,
+        "access": access(authority.granted),
         "templates": authority.templates.iter().map(|template| json!({
             "id": template.id,
             "name": template.name,
+            "enroll": template.enroll,
         })).collect::<Vec<_>>(),
         "certificate": authority.certificate.as_deref().and_then(summary).as_ref().map(summary_json),
         "crl_lifetime_days": authority.crl_lifetime_days,
@@ -210,6 +251,7 @@ pub fn authority_text(authority: &AuthorityInfo) -> String {
         ("Name", authority.name.clone()),
         ("ID", authority.id.clone()),
         ("State", state(authority).replace('-', " ")),
+        ("Your access", access_text(authority.granted)),
         ("Key", authority.key.clone()),
         (
             "Unattended",

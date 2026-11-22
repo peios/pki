@@ -134,6 +134,15 @@ pub enum Ca {
     },
     /// Change which templates a CA issues and where its CRL is published
     Set(Set),
+    /// Set who may do what at a CA
+    SetSecurity {
+        /// The CA, by name or ID
+        #[arg(value_name = "ca")]
+        ca: String,
+        /// The descriptor, as SDDL
+        #[arg(value_name = "sddl")]
+        sddl: String,
+    },
     /// Sign and publish a new CRL now
     PublishCrl {
         /// The CA, by name or ID

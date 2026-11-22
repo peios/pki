@@ -24,9 +24,9 @@ mod message;
 
 pub use codec::{read_frame, write_frame, CodecError, FrameError};
 pub use message::{
-    AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo, ErrorCode, Issuer, KeySpec, Outcome,
-    Passphrase, Reply, Request, RequestInfo, RequestQuery, RequestStatus, RevocationInfo,
-    SubmissionInfo, TemplateInfo, WireError,
+    AccessInfo, AuthorityInfo, CertificateInfo, CertificateQuery, CrlInfo, ErrorCode, Issuer,
+    KeySpec, Outcome, Passphrase, Reply, Request, RequestInfo, RequestQuery, RequestStatus,
+    RevocationInfo, SubmissionInfo, TemplateInfo, WireError,
 };
 
 /// pkid's runtime directory, which peinit creates (`RuntimeDirectories`).
