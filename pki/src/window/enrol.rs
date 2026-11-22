@@ -22,13 +22,15 @@ const ALGORITHMS: [(&str, &str); 5] = [
     ("rsa-4096", "RSA 4096"),
 ];
 
-/// The authorities the person may request from.
+/// The authorities the person may request from: those that issue from a
+/// template they may enrol in. A root that takes no requests isn't one.
 pub fn authorities(window: &Window) -> Vec<&AuthorityInfo> {
     window
         .seen
         .authorities()
         .iter()
         .filter(|a| a.granted & REQUEST != 0 && a.certificate.is_some())
+        .filter(|a| a.templates.iter().any(|t| t.enroll))
         .collect()
 }
 
@@ -127,7 +129,7 @@ pub fn page(window: &Window, fields: &Fields) -> String {
     let Some(authority) = chosen_ca(window, fields) else {
         return page
             + &settings::banner(
-                "There are no authorities you have permission to request certificates from.",
+                "No authority offers a template you have permission to request certificates from.",
             );
     };
     let enabled = !window.busy;

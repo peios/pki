@@ -82,7 +82,7 @@ fn setup_page(window: &Window) -> String {
             )
         } else {
             settings::locked(
-                "Only administrators can set up the certificate authority. Ask one to set it up.",
+                "You don't have permission to set up the certificate authority. Ask an administrator to set it up.",
             )
         },
     ));

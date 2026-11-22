@@ -877,6 +877,25 @@ fn what_alice_may_not_do_is_not_offered() {
 }
 
 #[test]
+fn only_authorities_with_a_template_to_request_from_are_offered() {
+    let mut window = at_page(admin(), Page::Enrol);
+    let page = render(&window, &Fields::default());
+    assert!(
+        !page.contains(r#"<option value="root">"#),
+        "the root takes no requests"
+    );
+    assert!(page.contains("Lab Issuing") || page.contains(r#"name="enrol-template""#));
+    for authority in &mut window.seen.pkid.as_mut().unwrap().authorities {
+        for template in &mut authority.templates {
+            template.enroll = false;
+        }
+    }
+    let page = render(&window, &Fields::default());
+    assert!(page.contains("No authority offers a template you have permission"));
+    assert!(!render(&at_page(window, Page::Overview), &Fields::default()).contains("st-nav-enrol"));
+}
+
+#[test]
 fn an_officer_cannot_approve_their_own_request() {
     let own = render(
         &at_page(
@@ -915,7 +934,7 @@ fn trouble_is_said_where_it_matters() {
                     && !html.contains(r#"fx-click="setup" disabled"#)
             ),
             "setup-user" => assert!(
-                html.contains("Ask one to set it up")
+                html.contains("Ask an administrator to set it up")
                     && html.contains(r#"fx-click="setup" disabled"#)
             ),
             "overview-no-authorities" => {
@@ -1009,4 +1028,18 @@ fn previews() {
         );
         std::fs::write(dir.join(format!("{name}.html")), html).unwrap();
     }
+}
+
+#[test]
+fn sentences_read_as_sentences() {
+    use super::service::sentence;
+    assert_eq!(sentence("access denied"), "Access denied.");
+    assert_eq!(
+        sentence("lab.home may not be requested"),
+        "lab.home may not be requested."
+    );
+    assert_eq!(
+        sentence("configuration: access check failed: Function not implemented (os error 38)"),
+        "Configuration: access check failed: Function not implemented."
+    );
 }

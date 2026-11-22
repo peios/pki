@@ -10,7 +10,7 @@ use pkid_core::{AuthorityInfo, CertificateInfo, RequestInfo, RequestStatus};
 
 use super::doing::Asking;
 use super::held::Held;
-use super::{describe, waiting, words, Window};
+use super::{waiting, words, Window};
 use crate::show::{OFFICER, READ};
 
 /// The Requests section's line in the side.
@@ -188,15 +188,21 @@ pub fn requests(window: &Window, fields: &Fields) -> String {
         }
         chosen => chosen,
     };
-    let options: Vec<(String, String)> = [
+    // What the list shows by default comes first: a page shows a select
+    // at its first option until a value it knows of reaches it.
+    let mut choices = [
         ("waiting", "Waiting"),
         ("issued", "Issued"),
         ("denied", "Denied"),
         ("all", "All"),
-    ]
-    .iter()
-    .map(|(value, label)| (value.to_string(), label.to_string()))
-    .collect();
+    ];
+    if ca.granted & OFFICER == 0 {
+        choices.rotate_right(1);
+    }
+    let options: Vec<(String, String)> = choices
+        .iter()
+        .map(|(value, label)| (value.to_string(), label.to_string()))
+        .collect();
     page.push_str(&settings::search(
         "find",
         "Find",
@@ -334,7 +340,7 @@ pub fn request(window: &Window, ca_id: &str, id: i64) -> String {
     ));
     let mut rows = settings::fact(
         "Requested By",
-        &describe::who_in_full(&request.requester, &window.people),
+        &window.who_in_full(&request.requester),
         false,
     );
     rows.push_str(&settings::fact(
@@ -743,7 +749,7 @@ pub fn certificate(window: &Window, ca_id: &str, serial: &[u8]) -> String {
     if let Some(owner) = &certificate.owner {
         rows.push_str(&settings::fact(
             "Bound to Account",
-            &describe::who_in_full(owner, &window.people),
+            &window.who_in_full(owner),
             false,
         ));
     }

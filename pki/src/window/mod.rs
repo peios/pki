@@ -401,9 +401,23 @@ impl Window {
         });
     }
 
-    /// Who a SID is, as a person reads it.
+    /// Who a SID is, as a person reads it. Their own SID, when authd can't
+    /// name it, is "You".
     pub fn who(&self, sid: &str) -> String {
-        describe::who(sid, &self.people)
+        let named = describe::who(sid, &self.people);
+        if named == sid && self.me.as_deref() == Some(sid) {
+            return "You".to_string();
+        }
+        named
+    }
+
+    /// Who a SID is, with their account when they have a display name too.
+    pub fn who_in_full(&self, sid: &str) -> String {
+        let named = describe::who_in_full(sid, &self.people);
+        if named == sid && self.me.as_deref() == Some(sid) {
+            return "You".to_string();
+        }
+        named
     }
 
     fn nav(&self) -> String {
@@ -423,10 +437,7 @@ impl Window {
         let reachable = self.seen.pkid.is_ok();
         if reachable {
             side.push_str("<h3>Certificates</h3>");
-            if authorities
-                .iter()
-                .any(|a| a.granted & crate::show::REQUEST != 0 && a.certificate.is_some())
-            {
+            if !enrol::authorities(self).is_empty() {
                 side.push_str(&nav(
                     "enrol",
                     "Request a Certificate",

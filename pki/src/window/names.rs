@@ -196,13 +196,21 @@ pub fn list(window: &Window, fields: &Fields) -> String {
                 },
             )
         };
+    // Said once: the banner above covers this when nothing can be changed.
+    let all_locked = !window.seen.may.settings
+        && window
+            .seen
+            .may
+            .names
+            .values()
+            .all(|may| !may.edit && !may.add);
     page.push_str(&settings::group(
         "Accounts",
         &rows,
-        &if window.seen.may.settings {
+        &if window.seen.may.settings || all_locked {
             String::new()
         } else {
-            settings::locked("Only administrators can change the principal domains.")
+            settings::locked("You don't have permission to change the principal domains.")
         },
     ));
 

@@ -101,8 +101,13 @@ pub fn sentence(text: &str) -> String {
     if text.is_empty() {
         return String::new();
     }
+    // The system's own error numbers mean nothing to a person.
+    let text = match text.find(" (os error ") {
+        Some(at) if text.ends_with(')') || text.ends_with(").") => text[..at].trim_end(),
+        _ => text,
+    };
     let first_word = text.split_whitespace().next().unwrap_or_default();
-    let named = first_word.contains(['.', '@', '\\', '/', ':']) && first_word.len() > 1;
+    let named = first_word.contains(['.', '@', '\\', '/']) && first_word.len() > 1;
     let mut chars = text.chars();
     let mut out: String = if named {
         text.to_string()
