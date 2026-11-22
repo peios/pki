@@ -720,8 +720,10 @@ fn submission(outcome: pkid_core::Outcome, reasons: &[&str]) -> Reply {
     })
 }
 
-fn request_file() -> PathBuf {
-    let path = scratch("leaf.csr");
+/// A request file of its own for each test: tests run at once, and
+/// `scratch` removes what is there.
+fn request_file(name: &str) -> PathBuf {
+    let path = scratch(name);
     std::fs::write(
         &path,
         crate::files::pem(crate::files::REQUEST, &[0x30, 0x00]),
@@ -732,7 +734,7 @@ fn request_file() -> PathBuf {
 
 #[test]
 fn submit_names_the_template_among_those_the_ca_offers() {
-    let csr = request_file();
+    let csr = request_file("leaf-2.csr");
     let host = fake().replying(submission(
         pkid_core::Outcome::Issued(vec![0x30, 0x00]),
         &[],
@@ -767,7 +769,7 @@ fn submit_names_the_template_among_those_the_ca_offers() {
 
 #[test]
 fn a_held_request_says_how_to_collect_its_certificate() {
-    let csr = request_file();
+    let csr = request_file("leaf-3.csr");
     let out = scratch("held.pem");
     let host = fake().replying(submission(
         pkid_core::Outcome::Pending,
@@ -794,7 +796,7 @@ fn a_held_request_says_how_to_collect_its_certificate() {
 
 #[test]
 fn a_refused_request_fails_with_its_reasons() {
-    let csr = request_file();
+    let csr = request_file("leaf-4.csr");
     let host = fake().replying(submission(
         pkid_core::Outcome::Denied,
         &["name not allowed"],

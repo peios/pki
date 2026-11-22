@@ -1,5 +1,6 @@
 import "github.com/gcslib/rust"
 import "github.com/gcslib/clang"
+import "github.com/peios/gxwi"
 import "github.com/peios/peios-rs" as peios_rs
 
 def crates() -> rust.RustWorkspace {
@@ -8,17 +9,20 @@ def crates() -> rust.RustWorkspace {
 
 # The workspace with libpeios placed for `peios-sys`, for the crates that
 # talk to Peios: pkid, its wire and its client, pki-management, pki and
-# pki-httpd.
-def native_crates() -> rust.RustWorkspace {
+# pki-httpd. The window build adds the `gxwi` crate's libgxwi.
+def native_crates(window: Bool = false) -> rust.RustWorkspace {
+    let gui: List<rust.CrateSettings> = if window { gxwi.crate_settings() } else { [] }
     = rust.workspace(
         dir("."), rust.vendored(file("Cargo.lock")),
-        crates = peios_rs.crate_settings(),
+        crates = [...peios_rs.crate_settings(), ...gui],
         libclang = [clang.libclang_18()],
     )
 }
 
 def build pkid() { = rust.bin(native_crates(), "pkid") }
 
-def build pki() { = rust.bin(native_crates(), "pki") }
+# The same program is the command line and the Certificate Authority
+# window, so it links libgxwi too.
+def build pki() { = rust.bin(native_crates(window = true), "pki", features = ["window"]) }
 
 def build pki_httpd() { = rust.bin(native_crates(), "pki-httpd") }

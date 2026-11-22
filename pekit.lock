@@ -41,6 +41,12 @@
       "git": "https://github.com/peios/peios-sdk",
       "dir": "",
       "rev": "712be642734adf2b97df11096075c3fa901857c1"
+    },
+    {
+      "prefix": "github.com/peios/gxwi",
+      "git": "https://github.com/peios/gxwi",
+      "dir": "",
+      "rev": "0cdbd97c86ca0e78138c6b320d88d5be8e2a6407"
     }
   ],
   "libraries": [
@@ -78,6 +84,13 @@
       "dir": "",
       "commit": "08732a35010b83be3bd4b97a932d13ec5b7b39cb",
       "tree": "6a65b76477327b07374c88242b8a695eeb5016827cf3079003b2dcd282ee1d14"
+    },
+    {
+      "path": "github.com/peios/gxwi",
+      "git": "https://github.com/peios/gxwi",
+      "dir": "",
+      "commit": "0cdbd97c86ca0e78138c6b320d88d5be8e2a6407",
+      "tree": "bdeeb23a43d98980e360457c02f307467c32137e34b4ba4a9d43b39cb6fe3536"
     },
     {
       "path": "github.com/peios/peios-rs",
