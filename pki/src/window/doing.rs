@@ -946,3 +946,45 @@ impl Window {
         );
     }
 }
+
+impl Window {
+    /// Has pki-httpd serve on the port typed, and restarts it if it runs
+    /// and the person may.
+    pub(super) fn save_http_port(&mut self, fields: &mut Fields) {
+        let Some(port) = fields
+            .get("http-port")
+            .trim()
+            .parse::<u16>()
+            .ok()
+            .filter(|p| *p > 0)
+        else {
+            self.said = Some(Err("The port is a number from 1 to 65535.".into()));
+            return;
+        };
+        let restart = self.seen.httpd_service.running()
+            && self
+                .seen
+                .httpd_service
+                .allows(peinit::client::Command::Restart);
+        self.launch(
+            Box::new(move || {
+                let mut said = act::set_http_port(&Live::new(), port)?;
+                if restart {
+                    match super::service::command(
+                        super::service::HTTPD,
+                        peinit::client::Command::Restart,
+                    ) {
+                        Ok(()) => said.push_str(" Revocation Publishing restarted."),
+                        Err(why) => said
+                            .push_str(&format!(" Restart Revocation Publishing to use it: {why}")),
+                    }
+                } else {
+                    said.push_str(" Revocation Publishing uses it from its next start.");
+                }
+                Ok(said)
+            }),
+            Some(Page::Overview),
+            fields,
+        );
+    }
+}

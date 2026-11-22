@@ -46,7 +46,7 @@ fn dword(values: &Values, name: &str) -> Option<u32> {
 }
 
 /// A descriptor in SDDL, or a note that it can't be read.
-fn sddl_text(bytes: &[u8]) -> String {
+pub(crate) fn sddl_text(bytes: &[u8]) -> String {
     sddl::format(bytes).unwrap_or_else(|_| "(not a valid descriptor)".to_string())
 }
 

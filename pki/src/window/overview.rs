@@ -1,7 +1,7 @@
 //! The overview: whether the CA runs, what needs attention, and the two
 //! services. Before `pki setup`, the page to set it up.
 
-use gxwi::settings::{self, Glyph, Kind, Tile, Tone};
+use gxwi::settings::{self, Glyph, Kind, Tile, Tone, Width};
 use peinit::client::Command;
 
 use super::seen::Trouble;
@@ -233,14 +233,35 @@ pub fn page(window: &Window) -> String {
         service::HTTPD,
         &window.seen.httpd_service,
     ));
-    rows.push_str(&settings::fact(
-        "Revocation List Port",
-        &window
-            .seen
-            .http_port
-            .map_or("Unknown".to_string(), |port| port.to_string()),
-        false,
-    ));
+    // Changing the port runs setup again, which reserves it.
+    if window.seen.may.http && window.seen.may.setup {
+        rows.push_str(&settings::row(
+            "Revocation List Port",
+            "Where other devices fetch revocation lists. Changing it restarts Revocation Publishing.",
+            &format!(
+                "{}{}",
+                settings::text(
+                    "http-port",
+                    "Revocation List Port",
+                    "number",
+                    Width::Short,
+                    !window.busy,
+                    r#"min="1" max="65535""#,
+                ),
+                settings::button("Save", "http-port-save", &[], Kind::Plain, !window.busy)
+                    .replacen("class=\"st-button\"", "class=\"st-button pki-beside\"", 1),
+            ),
+        ));
+    } else {
+        rows.push_str(&settings::fact(
+            "Revocation List Port",
+            &window
+                .seen
+                .http_port
+                .map_or("Unknown".to_string(), |port| port.to_string()),
+            false,
+        ));
+    }
     let controls = [&window.seen.pkid_service, &window.seen.httpd_service]
         .iter()
         .any(|service| {
@@ -256,6 +277,22 @@ pub fn page(window: &Window) -> String {
         } else {
             settings::locked("You don't have permission to start or stop these services.")
         },
+    ));
+    let editable = window.seen.may.settings;
+    page.push_str(&settings::group(
+        "Permissions",
+        &settings::row(
+            "Who Can Add Authorities",
+            &describe::creators(&window.seen.creators(), &window.people),
+            &settings::button(
+                if editable { "Edit…" } else { "View…" },
+                "creators-permissions",
+                &[],
+                Kind::Plain,
+                !window.busy,
+            ),
+        ),
+        &settings::hint("Whoever can add an authority can issue any certificate from it."),
     ));
     if window.seen.pkid.is_ok() {
         page.push_str(&settings::hint(

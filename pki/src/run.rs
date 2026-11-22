@@ -19,7 +19,7 @@ use crate::{config, enroll, issue};
 
 pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
     match command {
-        Command::Setup => setup(host),
+        Command::Setup(args) => setup(host, args.http_port),
         Command::Ca(command) => ca(host, command),
         Command::Request(command) => issue::request(host, command),
         Command::Cert(command) => issue::cert(host, command),
@@ -30,15 +30,23 @@ pub fn run(host: &dyn Host, command: Command) -> Result<Output, Failure> {
     }
 }
 
-fn setup(host: &dyn Host) -> Result<Output, Failure> {
-    let seeded = host.setup().map_err(|error| {
+fn setup(host: &dyn Host, http_port: Option<u16>) -> Result<Output, Failure> {
+    let refused = |error: std::io::Error| {
         let failure = Failure::io(&error).context("setup");
         if failure.kind == Kind::Denied {
             failure.hint("Run pki setup as an administrator.")
         } else {
             failure
         }
-    })?;
+    };
+    // The port first, so that setup reserves it.
+    if let Some(port) = http_port {
+        let mut values = pki_policy::Values::new();
+        values.insert("Port", pki_policy::RegData::Dword(u32::from(port)));
+        host.put(&format!("{}\\Http", pki_management::ROOT), &values, &[])
+            .map_err(refused)?;
+    }
+    let seeded = host.setup().map_err(refused)?;
     let mut text = String::from("pkid's state directories are in place.\n");
     if !seeded.templates.is_empty() {
         text.push_str("Added the Server and Device templates.\n");
@@ -58,14 +66,20 @@ fn setup(host: &dyn Host) -> Result<Output, Failure> {
         }
         Reservation::Present => {}
         Reservation::Taken(port) => host.warn(&format!(
-            "TCP port {port} is reserved for another service, so pki-httpd can't serve CRLs on it; set Machine\\Software\\Pki\\Http Port to another port, then run pki setup again"
+            "TCP port {port} is reserved for another service, so pki-httpd can't serve CRLs on it; choose another with pki setup --http-port"
         )),
         Reservation::NoTable => host.warn(
             "this machine has no port reservation table, so pki-httpd may be unable to bind its port",
         ),
     }
+    if let Some(port) = http_port {
+        text.push_str(&format!(
+            "pki-httpd serves revocation lists on port {port} from its next start.\n"
+        ));
+    }
     Ok(Output {
         json: json!({
+            "http_port": http_port,
             "templates_added": seeded.templates,
             "name_roots_added": seeded.name_roots,
             "authorities_key_added": seeded.authorities_key,
@@ -564,6 +578,54 @@ fn ca(host: &dyn Host, command: Ca) -> Result<Output, Failure> {
             Ok(Output {
                 text: show::authority_text(&authority),
                 json: json!({"changed": show::authority_json(&authority)}),
+            })
+        }
+
+        Ca::Creators { set } => {
+            let settings = format!("{}\\Settings", pki_management::ROOT);
+            let (security, own) = match set {
+                Some(text) => {
+                    let security = config::parse_sddl(&text)?;
+                    let has_dacl = peios::security::SdView::parse(&security)
+                        .is_ok_and(|view| view.dacl().is_some());
+                    if !has_dacl {
+                        return Err(Failure::usage(
+                            "creators: the descriptor needs an access list; without one, everyone could create CAs",
+                        ));
+                    }
+                    let mut values = pki_policy::Values::new();
+                    values.insert(
+                        "ManageSecurity",
+                        pki_policy::RegData::Binary(security.clone()),
+                    );
+                    host.put(&settings, &values, &[]).map_err(|error| {
+                        let failure = Failure::io(&error).context("creators");
+                        if failure.kind == Kind::Denied {
+                            failure.hint("Only an administrator can change pki's configuration.")
+                        } else {
+                            failure
+                        }
+                    })?;
+                    for warning in security::broad_creators(&security).unwrap_or_default() {
+                        host.warn(&warning);
+                    }
+                    (security, true)
+                }
+                None => {
+                    let snapshot = config::snapshot(host)?;
+                    match snapshot.settings.binary("ManageSecurity").ok().flatten() {
+                        Some(security) => (security.to_vec(), true),
+                        None => (config::parse_sddl(pki_policy::DEFAULT_MANAGE_SDDL)?, false),
+                    }
+                }
+            };
+            let text = config::sddl_text(&security);
+            Ok(Output {
+                text: format!(
+                    "Who can create and import CAs: {text}{}\n",
+                    if own { "" } else { " (the default)" }
+                ),
+                json: json!({"security": text, "default": !own}),
             })
         }
 

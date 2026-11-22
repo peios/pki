@@ -24,9 +24,7 @@ pub struct Defaults {
     pub manage_security: SecurityBlob,
 }
 
-/// The default `Settings ManageSecurity`: Administrators and SYSTEM may
-/// create and import CAs.
-pub const DEFAULT_MANAGE_SDDL: &str = "O:SYG:SYD:(A;;0x8;;;BA)(A;;0x8;;;SY)";
+pub use pki_policy::DEFAULT_MANAGE_SDDL;
 
 /// A CA as configured.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -77,7 +77,8 @@ Who may create and import CAs on this pkid: Manage CA (0x8). Changing an
 existing CA needs Manage CA in its own CaSecurity instead.
 
 Whoever holds it can create a root and issue anything from it, so grant it
-only to principals you would trust to run the CA.
+only to principals you would trust to run the CA. Show or set it with
+`pki ca creators`.
 
 --- machine\software\pki\templates
 canonical: Machine\Software\Pki\Templates
@@ -396,5 +397,5 @@ applies: restart of pki-httpd
 The TCP port pki-httpd serves CRLs on. Binding it needs a reservation in
 Machine\System\Network\TcpIp\PortReservations that grants pki-httpd;
 `pki setup` adds one for this port unless another reservation of exactly
-that port exists, which it never replaces. Run `pki setup` again after
-changing the port.
+that port exists, which it never replaces. Set it with
+`pki setup --http-port`, which reserves the new port too.

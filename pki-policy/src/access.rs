@@ -30,6 +30,10 @@ pub const TEMPLATE_ALL: u32 = TEMPLATE_ENROLL | TEMPLATE_AUTOENROLL;
 /// below the root.
 pub const DEFAULT_NAME_ROOT_SDDL: &str = "O:SYG:SYD:(A;CI;0x1;;;PS)(A;CI;0x7;;;BA)(A;CI;0x7;;;SY)";
 
+/// Who may create and import CAs when `Settings ManageSecurity` is absent:
+/// Manage CA (0x8) for Administrators and SYSTEM.
+pub const DEFAULT_MANAGE_SDDL: &str = "O:SYG:SYD:(A;;0x8;;;BA)(A;;0x8;;;SY)";
+
 /// The default `EnrollSecurity` of the shipped templates.
 ///
 /// Any authenticated principal may enrol; the name policy decides which

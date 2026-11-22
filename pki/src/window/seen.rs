@@ -109,6 +109,22 @@ impl Seen {
     pub fn authority(&self, id: &str) -> Option<&AuthorityInfo> {
         self.authorities().iter().find(|a| a.id == id)
     }
+
+    /// Who may create and import authorities: `Settings ManageSecurity`,
+    /// or pkid's default without one.
+    pub fn creators(&self) -> Vec<u8> {
+        self.config
+            .as_ref()
+            .ok()
+            .and_then(|config| config.settings.binary("ManageSecurity").ok().flatten())
+            .map(<[u8]>::to_vec)
+            .or_else(|| {
+                peios::security::sddl::parse(pki_policy::DEFAULT_MANAGE_SDDL)
+                    .ok()
+                    .map(|sd| sd.as_bytes().to_vec())
+            })
+            .unwrap_or_default()
+    }
 }
 
 pub fn look() -> Seen {

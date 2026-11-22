@@ -261,6 +261,11 @@ impl Window {
                 fields.set("sign-path", "0");
             }
             Page::ExportKey(_) => fields.set("key-out", ""),
+            Page::Overview => {
+                if let Some(port) = self.seen.http_port {
+                    fields.set("http-port", &port.to_string());
+                }
+            }
             Page::Template(id) => {
                 if let Some((_, values)) = self
                     .seen
@@ -743,6 +748,8 @@ impl Live for Window {
             "owner-confirm" if !self.busy => self.set_owner(false, fields),
             "owner-none" if !self.busy => self.set_owner(true, fields),
             "domains-save" if !self.busy => self.save_domains(fields),
+            "creators-permissions" => self.edit_creators_permissions(),
+            "http-port-save" if !self.busy => self.save_http_port(fields),
             "approve" if !self.busy => {
                 if let Ok(id) = text("id").parse() {
                     self.approve(text("ca"), id, fields);

@@ -1663,3 +1663,48 @@ mod window {
         );
     }
 }
+
+#[test]
+fn creators_are_shown_and_set_with_warnings() {
+    let shown = running(&fake(), "ca creators").unwrap();
+    assert!(shown.text.contains("(the default)"), "{}", shown.text);
+    assert!(shown.text.contains("(A;;0x8;;;BA)"), "{}", shown.text);
+    assert_eq!(shown.json["default"], true);
+
+    let host = fake();
+    running(&host, "ca creators --set D:(A;;0x8;;;BA)(A;;0x8;;;AU)").unwrap();
+    let writes = host.writes.borrow();
+    let Some(Write::Put(path, values, _)) = writes.last() else {
+        panic!("{writes:?}")
+    };
+    assert_eq!(path, "Machine\\Software\\Pki\\Settings");
+    assert!(values.binary("ManageSecurity").unwrap().is_some());
+    let warnings = host.warnings.borrow();
+    assert!(
+        warnings
+            .iter()
+            .any(|w| w.starts_with("Authenticated Users may now create CAs")),
+        "{warnings:?}"
+    );
+
+    let failure = running(&fake(), "ca creators --set O:SYG:SY").unwrap_err();
+    assert_eq!(failure.kind, Kind::Usage);
+}
+
+#[test]
+fn setup_sets_the_http_port_before_it_reserves_it() {
+    let host = fake();
+    // The stand-in refuses provisioning; the port is written first.
+    let failure = running(&host, "setup --http-port 8080").unwrap_err();
+    assert_eq!(failure.kind, Kind::Denied);
+    let writes = host.writes.borrow();
+    let Some(Write::Put(path, values, _)) = writes.first() else {
+        panic!("{writes:?}")
+    };
+    assert_eq!(path, "Machine\\Software\\Pki\\Http");
+    assert_eq!(values.dword("Port").unwrap(), Some(8080));
+    assert_eq!(
+        usage_error("setup --http-port 0"),
+        "--http-port <port>: '0' is not valid"
+    );
+}

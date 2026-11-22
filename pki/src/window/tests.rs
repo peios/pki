@@ -925,9 +925,15 @@ fn trouble_is_said_where_it_matters() {
                 assert!(html.contains("The Server template is invalid"));
                 assert!(html.contains(&format!(r#"fx-click="template" fx-value-id="{SERVER}""#)));
             }
-            "overview-alice" => assert!(!html.contains("without approval"), "she can't change it"),
+            "overview-alice" => {
+                assert!(!html.contains("without approval"), "she can't change it");
+                assert!(!html.contains("http-port-save"));
+                assert!(html.contains("Who Can Add Authorities") && html.contains("View…"));
+            }
             "overview" => {
-                assert!(html.contains("Authenticated Users may request lab.home without approval"))
+                assert!(html.contains("Authenticated Users may request lab.home without approval"));
+                assert!(html.contains("http-port-save"));
+                assert!(html.contains("Administrators and SYSTEM"));
             }
             "setup" => assert!(
                 html.contains(r#"fx-click="setup""#)

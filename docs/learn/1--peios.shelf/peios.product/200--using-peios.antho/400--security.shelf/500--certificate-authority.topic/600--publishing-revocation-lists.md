@@ -108,8 +108,15 @@ openssl crl -inform DER -in home-issuing.crl -noout -issuer -nextupdate
 ## Serve on another port
 
 If another service already serves port 80, `pki setup` warns that the port
-is reserved for it. Choose another port for pki-httpd, such as 8080, by
-setting `Machine\Software\Pki\Http Port`, and run `pki setup` again to
-reserve it. Restart pki-httpd, and give each CA an address with that port,
-such as `http://pki.home:8080/crl/home-issuing.crl`. `pki-httpd(8)` describes
+is reserved for it. Choose another port for pki-httpd, such as 8080, and
+reserve it:
+
+```sh
+pki setup --http-port 8080
+```
+
+Restart pki-httpd, and give each CA an address with that port, such as
+`http://pki.home:8080/crl/home-issuing.crl`. In the Certificate Authority
+window, change **Revocation List Port** on the overview, which restarts
+pki-httpd for you. `pki-httpd(8)` describes
 the service.
