@@ -570,9 +570,11 @@ impl Window {
             ));
             return;
         };
+        // Opening the page again fills the form with what was saved.
+        let page = Some(self.page.clone());
         self.launch(
             Box::new(move || act::configure(&Live::new(), &ca, templates, crls, Some(lifetime))),
-            None,
+            page,
             fields,
         );
     }
@@ -809,11 +811,14 @@ impl Window {
             return;
         };
         match super::templates::read(&values, fields) {
-            Ok(form) => self.launch(
-                Box::new(move || act::change_template(&Live::new(), &id, form)),
-                None,
-                fields,
-            ),
+            Ok(form) => {
+                let page = Some(self.page.clone());
+                self.launch(
+                    Box::new(move || act::change_template(&Live::new(), &id, form)),
+                    page,
+                    fields,
+                )
+            }
             Err(why) => self.said = Some(Err(why)),
         }
     }
@@ -936,7 +941,7 @@ impl Window {
         let domains = names(fields.get("domains"));
         self.launch(
             Box::new(move || act::set_domains(&Live::new(), domains)),
-            None,
+            Some(Page::Names),
             fields,
         );
     }

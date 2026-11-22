@@ -285,7 +285,13 @@ impl Window {
     /// shows a field's last value, not what the window chose by default.
     fn sync(&self, fields: &mut Fields) {
         if matches!(self.page, Page::Requests | Page::Certificates) {
-            if let Some(ca) = self.listed_ca(fields).map(|a| a.id.clone()) {
+            if let Some(ca) = self.listed_ca(fields) {
+                // What the Requests page shows until the person chooses.
+                if fields.get("show").is_empty() {
+                    let officer = ca.granted & crate::show::OFFICER != 0;
+                    fields.set("show", if officer { "waiting" } else { "all" });
+                }
+                let ca = ca.id.clone();
                 if fields.get("ca") != ca {
                     fields.set("ca", &ca);
                 }
@@ -384,9 +390,6 @@ impl Window {
                         Ok((said, then)) => {
                             if let Some(page) = then {
                                 w.open(page, fields);
-                            } else {
-                                // What was saved is what the form shows now.
-                                w.fill(fields);
                             }
                             Ok(said)
                         }
