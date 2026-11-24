@@ -29,9 +29,9 @@ time = { workspace = true, features = ["formatting"] }
 x509-parser.workspace = true
 zeroize = "1.8"
 # Display names of requesters and officers, from authd.
-auth-core = { git = "https://github.com/peios/authd.git", rev = "327ce68648e1594331c88a457afb261f9000b4c3", features = ["client"], optional = true }
+auth-core = { git = "https://github.com/peios/authd.git", rev = "af3f0df00b94bf578b27788fc2682d795fe46505", features = ["client"], optional = true }
 # Starting and stopping pkid and pki-httpd, as the caller may.
-peinit2 = { git = "https://github.com/peios/peinit.git", rev = "8ff7155b87e1f8c03ce78baf64d8d7b5425fbe3a", default-features = false }
-gxwi = { git = "https://github.com/peios/gxwi.git", rev = "0cdbd97c86ca0e78138c6b320d88d5be8e2a6407", optional = true }
-gxwi-file-dialog = { git = "https://github.com/peios/gxwi-essentials.git", rev = "bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4", default-features = false, optional = true }
-gxwi-sd-editor = { git = "https://github.com/peios/gxwi-essentials.git", rev = "bde15e2817e2e096c4f3ba1c6f7ef37ea1a997e4", default-features = false, features = ["registry", "splice"], optional = true }
+peinit2 = { git = "https://github.com/peios/peinit.git", rev = "f03f61759a2cd7941e84452984ba0e1b613d1559", default-features = false }
+gxwi = { git = "https://github.com/peios/gxwi.git", rev = "a8a92eb6f9127319310b3f8ad2c31f436a1f9281", optional = true }
+gxwi-file-dialog = { git = "https://github.com/peios/gxwi-essentials.git", rev = "7b641ee2601a34920b5d8f468bc3597efc9b17c1", default-features = false, optional = true }
+gxwi-sd-editor = { git = "https://github.com/peios/gxwi-essentials.git", rev = "7b641ee2601a34920b5d8f468bc3597efc9b17c1", default-features = false, features = ["registry", "splice"], optional = true }
