@@ -20,10 +20,10 @@ publish = false
 # x509-parser keeps verify-aws solely because rcgen's x509-parser feature
 # doesn't compile without a verify feature; pki never calls it. Tests enable
 # more where an independent implementation helps.
-peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "623520bc0405fdd4526bab45f45882e7f19b1ab1" }
+peios-crypto = { git = "https://github.com/peios/peios-rs.git", rev = "ebb1e39ca99ae8371dd9e8dc45844feb474d056c" }
 # The same commit as peios-crypto and as pekit.lock's peios-rs library, which
 # places libpeios for it: the rust library refuses a mismatch.
-peios = { git = "https://github.com/peios/peios-rs.git", rev = "623520bc0405fdd4526bab45f45882e7f19b1ab1" }
+peios = { git = "https://github.com/peios/peios-rs.git", rev = "ebb1e39ca99ae8371dd9e8dc45844feb474d056c" }
 pem = "4"
 rcgen = { version = "=0.14.10", default-features = false, features = ["x509-parser"] }
 rusqlite = { version = "=0.40.2", features = ["bundled"] }

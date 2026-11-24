@@ -8,7 +8,7 @@ publish.workspace = true
 
 [dependencies]
 # authd's identity socket: who owns a principal name, and display names.
-auth-core = { git = "https://github.com/peios/authd.git", rev = "327ce68648e1594331c88a457afb261f9000b4c3", features = ["client"] }
+auth-core = { git = "https://github.com/peios/authd.git", rev = "af3f0df00b94bf578b27788fc2682d795fe46505", features = ["client"] }
 libc = "0.2"
 peios.workspace = true
 peios-crypto.workspace = true
