@@ -23,6 +23,8 @@ mod passphrase;
 mod provider;
 mod reference;
 mod service;
+#[cfg(test)]
+mod vectors;
 
 pub use error::KeyError;
 pub use file::KeyFileProvider;
